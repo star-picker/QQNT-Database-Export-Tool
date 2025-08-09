@@ -1,0 +1,17 @@
+[project]
+name = "nt-msg-py"
+version = "0.1.0"
+description = "a python repo to parse qq's nt_msg.db"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "blackboxprotobuf>=1.0.1",
+    "lxml>=5.3.1",
+    "pydantic>=2.10.6",
+    "sqlalchemy>=2.0.38",
+]
+
+[dependency-groups]
+dev = [
+    "pylint>=3.3.5",
+]
