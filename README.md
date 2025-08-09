@@ -31,10 +31,10 @@ A Python based tool for exporting chat history from a decrypted QQNT database.
     <!-- end list -->
 
     ```sql
-    PRAGMA key = 'pass key'; -- 'pass key' 是您之前计算出的数据库密钥
+    PRAGMA key = 'pass key'; # 'pass key' 是您之前计算出的数据库密钥
     PRAGMA cipher_page_size = 4096;
     PRAGMA kdf_iter = 4000;
-    PRAGMA cipher_hmac_algorithm = HMAC_SHA1; -- 请参考 https://docs.aaqwq.top/ 按照实际情况填写
+    PRAGMA cipher_hmac_algorithm = HMAC_SHA1; # 请参考 https://docs.aaqwq.top/ 按照实际情况填写
     PRAGMA cipher_default_kdf_algorithm = PBKDF2_HMAC_SHA512;
     PRAGMA cipher = 'aes-256-cbc';
     ```
