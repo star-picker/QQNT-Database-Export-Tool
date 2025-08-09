@@ -199,3 +199,15 @@ This project is inspired by and references the following excellent open-source p
   * **[Tealina28/QQNT\_Export](https://github.com/Tealina28/QQNT_Export?tab=readme-ov-file)**: For the program framework and `protobuf` definitions.
   * **[QQBackup/qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)**: For database decryption, `protobuf` definitions, and database table definitions.
   * **[https://docs.aaqwq.top/](https://docs.aaqwq.top/)**: For database decryption, `protobuf` definitions, and database table definitions.
+
+---
+
+## 免责声明 | Disclaimer
+
+**本项目仅供学习交流使用，严禁用于任何违反中国大陆法律法规、您所在地区法律法规、QQ软件许可及服务协议的行为，开发者不承担任何相关行为导致的直接或间接责任。**
+
+**This project is intended solely for learning and communication purposes. Its use for any activities that violate the laws and regulations of Mainland China, the laws and regulations of your region, or the QQ Software License and Service Agreement is strictly prohibited. The developer(s) shall not bear any direct or indirect liability arising from such related conduct.**
+
+**本项目不对生成内容的完整性、准确性作任何担保，生成的一切内容不可用于法律取证，您不应当将其用于学习与交流外的任何用途。**
+
+**This project makes no warranties whatsoever regarding the completeness or accuracy of any generated content. All generated content shall not be used as legal evidence. You should not use it for any purpose other than learning and communication.**
