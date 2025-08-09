@@ -1,0 +1,65 @@
+from collections import defaultdict
+import os
+import sqlite3
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.query import Query
+
+__all__ = ["DatabaseManager"]
+
+# 定义一个自定义的 text_factory，用于处理非 UTF-8 编码的文本
+def gbk_text_factory(x):
+    """
+    将 bytes 类型的数据用 gbk 编码解码为 str。
+    """
+    try:
+        return x.decode("gbk", "ignore")
+    except Exception:
+        # 如果 gbk 解码失败，回退到默认的 utf-8 解码
+        return x.decode("utf-8", "ignore")
+
+# 定义一个自定义的连接函数，用于配置 sqlite3 连接
+def get_sqlite_connection(db_path):
+    conn = sqlite3.connect(db_path)
+    conn.text_factory = gbk_text_factory
+    return conn
+
+class DatabaseManager:
+    _models = defaultdict(defaultdict)
+    _loaded = set()
+    _sessions = {}
+
+    @classmethod
+    def register_model(cls, db_id: str) -> callable:
+        def wrapper(model):
+            cls._models[db_id][model.__tablename__] = model
+            return model
+        return wrapper
+    
+    def __new__(cls):
+        for db_filename in cls._models.keys():
+            if os.path.exists(f"{db_filename}.decrypt.db"):
+                cls._loaded.add(db_filename)
+        for _ in cls._loaded:
+            db_path = f"sqlite:///./{_}.decrypt.db"
+            engine = create_engine(
+                "sqlite:///",
+                connect_args={'check_same_thread': False},
+                creator=lambda: get_sqlite_connection(f"./{_}.decrypt.db")
+            )
+            cls._sessions[_] = Session(engine)
+        return super(DatabaseManager, cls).__new__(cls)
+    
+    def __init__(self):
+        pass
+    
+    def group_messages(self) -> Query:
+        return self._sessions["nt_msg"].query(self._models["nt_msg"]["group_msg_table"])
+
+    # 新增方法，用于查询私聊消息
+    def c2c_messages(self) -> Query:
+        return self._sessions["nt_msg"].query(self._models["nt_msg"]["c2c_msg_table"])
+
+
+from .models import *
