@@ -74,7 +74,7 @@ A Python based tool for exporting chat history from a decrypted QQNT database.
       * 在命令行中执行以下命令以激活虚拟环境：
     <!-- end list -->
     ```bash
-    .venv\Scripts\activate.bat
+    .venv\Scripts\activate
     ```
 2.  **准备主程序文件**：
       * 将您需要使用的 `main-xxxx.py` 文件重命名为 `main.py`。
@@ -173,7 +173,7 @@ Before using this tool, you need to decrypt your QQNT database. The following st
       * In your command line, run the following command to activate the virtual environment:
     <!-- end list -->
     ```bash
-    .venv\Scripts\activate.bat
+    .venv\Scripts\activate
     ```
 2.  **Prepare the Main Script**:
       * Rename the desired `main-xxxx.py` file to `main.py`.
