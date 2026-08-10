@@ -1,1 +1,0 @@
-from .man import DatabaseManager
