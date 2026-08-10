@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQ NT 聊天记录导出工具 - 控制面板</title>
+    <link rel="icon" href="/lib/icon.ico" type="image/png">
+    <script src="/lib/tailwind.min.js"></script>
+    <script src="/lib/Sortable.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --panel-bg: #2a2a2a;
+            --border-color: #444;
+            --primary-color: #007bff;
+            --hover-bg: #3a3a3a;
+            --self-msg-bg: #005c4b;
+            --other-msg-bg: #36404a;
+        }
+        html, body { 
+            font-family: 'Inter', 'Helvetica Neue', 'Arial', 'sans-serif', "Microsoft YaHei";
+            background-color: var(--bg-color); 
+            color: var(--text-color);
+            overflow: hidden;
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: clamp(280px, 25vw, 360px) 1fr clamp(350px, 30vw, 420px);
+            height: 100vh;
+        }
+        .panel { background-color: var(--panel-bg); border-color: var(--border-color); }
+        .resizable-panel { resize: horizontal; overflow: auto; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--panel-bg); }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        .contact-item-container.active { background-color: var(--primary-color) !important; color: white; }
+        .chat-bubble { max-width: 80%; word-break: break-word; }
+        .chat-bubble-self { background-color: var(--self-msg-bg); }
+        .chat-bubble-other { background-color: var(--other-msg-bg); }
+        .system-message { color: #aaa; font-style: italic; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .status-connected { background-color: #28a745; }
+        .status-disconnected { background-color: #dc3545; }
+        
+        .toggle-label {
+            width: 44px; height: 24px; border-radius: 9999px; position: relative;
+            transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+            cursor: pointer; background-color: #4a5568;
+            border: 2px solid #4a5568;
+        }
+        .toggle-label::after {
+            content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+            border-radius: 9999px; background-color: white; transition: transform 0.2s;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            box-shadow: 0 0 8px rgba(0, 123, 255, 0.6);
+        }
+        .toggle-checkbox:checked + .toggle-label::after { transform: translateX(20px); }
+
+        .tab-btn.active { background-color: var(--primary-color); color: white; }
+        .tab-btn { background-color: #4a5568; }
+        .option-item:hover { background-color: var(--hover-bg); }
+        .hidden { display: none !important; }
+
+        /* SortableJS styles */
+        .field-chip {
+            background-color: #4a5568;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 16px;
+            cursor: grab;
+            transition: background-color 0.2s, box-shadow 0.2s;
+            font-size: 13px;
+            margin: 4px;
+            display: inline-block;
+            border: 1px solid #636e82;
+            user-select: none;
+        }
+        .field-chip:hover {
+            background-color: #636e82;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        .sortable-ghost {
+            background-color: var(--primary-color);
+            opacity: 0.6;
+            border-radius: 16px;
+        }
+        #selected-fields-container, #available-fields-container, #raw-selected-fields-container, #raw-available-fields-container {
+             min-height: 150px;
+        }
+        .dropdown { position: relative; display: inline-block; }
+        .dropdown-content {
+            display: none; position: absolute; right: 0; background-color: #3e3e3e;
+            min-width: 120px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5);
+            z-index: 10; border-radius: 4px; overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .dropdown-content a {
+            color: var(--text-color); padding: 8px 12px; text-decoration: none;
+            display: block; font-size: 13px;
+        }
+        .dropdown-content a:hover { background-color: var(--hover-bg); }
+        .dropdown:hover .dropdown-content { display: block; }
+
+        #field-filter-tags button.active { background-color: var(--primary-color); }
+    </style>
+</head>
+<body class="overflow-hidden">
+
+    <div class="main-grid">
+        <!-- Left Panel -->
+        <div id="left-panel" class="panel border-r flex flex-col resizable-panel min-w-[280px]">
+            <div class="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-bold">ARK-1 | 控制台</h2>
+                    <div id="selection-count" class="text-sm text-gray-400">已选: 0</div>
+                </div>
+                <div class="flex space-x-2 mb-2">
+                    <button id="show-friends-btn" class="tab-btn active flex-1 px-3 py-1 rounded-md text-sm">好友</button>
+                    <button id="show-groups-btn" class="tab-btn flex-1 px-3 py-1 rounded-md text-sm">群聊</button>
+                    <button id="open-analyzer-btn" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded-md flex-shrink-0">分析器</button>
+                </div>
+                 <div id="list-controls" class="flex space-x-2 mb-2">
+                    <button id="expand-all-btn" class="flex-1 bg-gray-600 hover:bg-gray-500 text-xs px-2 py-1 rounded-md">全部展开</button>
+                    <button id="collapse-all-btn" class="flex-1 bg-gray-600 hover:bg-gray-500 text-xs px-2 py-1 rounded-md">全部收起</button>
+                    <button id="select-all-groups-btn" class="hidden flex-1 bg-gray-600 hover:bg-gray-500 text-xs px-2 py-1 rounded-md">全选/反选</button>
+                </div>
+                <input type="text" id="search-contact" placeholder="搜索联系人..." class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div id="contact-list" class="flex-grow overflow-y-auto p-2">
+                <div class="text-center p-8 text-gray-400">正在连接服务器...</div>
+            </div>
+        </div>
+
+        <!-- Center Panel -->
+        <div id="center-panel" class="flex flex-col bg-gray-900 overflow-hidden min-w-[300px]">
+            <div id="chat-header" class="p-3 border-b border-gray-700 sticky top-0 bg-gray-800 z-10 flex-shrink-0">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 id="chat-title" class="text-xl font-bold truncate">选择一个会话以预览</h2>
+                    <div class="flex items-center">
+                         <!-- New Load Mode Toggle Switch (Standard Checkbox) -->
+                        <div class="flex items-center space-x-2 text-sm">
+                            <label for="load-mode-toggle" class="cursor-pointer text-gray-300">加载全部</label>
+                            <input type="checkbox" id="load-mode-toggle" class="h-4 w-4 rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500 cursor-pointer">
+                        </div>
+                        <!-- Connection Status -->
+                        <div class="flex items-center space-x-2 text-sm ml-4">
+                            <span id="status-dot" class="status-dot status-disconnected"></span>
+                            <span id="connection-status">未连接</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <input type="date" id="chat-date-picker" class="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm text-gray-300">
+                    <input type="text" id="chat-search" placeholder="搜索记录..." class="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <!-- Modified chat messages container for virtual scroll -->
+            <div id="chat-messages" class="flex-grow overflow-y-auto p-4 relative">
+                <div id="chat-messages-sizer" style="position: relative; overflow: hidden; width: 100%; height: 0;">
+                    <div id="chat-messages-content" style="position: absolute; top: 0; left: 0; width: 100%;" class="space-y-4">
+                        <!-- Messages will be rendered here -->
+                    </div>
+                </div>
+                 <div id="chat-placeholder" class="m-auto text-center text-gray-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    <p class="mt-2">请从左侧选择一个会话开始预览历史记录。</p>
+                </div>
+                 <div id="chat-loader" class="hidden m-auto text-center text-gray-500"></div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div id="right-panel" class="panel border-l flex flex-col min-w-[350px] h-screen">
+            <div class="p-4 border-b border-gray-700 flex-shrink-0">
+                <h2 class="text-xl font-bold">导出控制面板</h2>
+            </div>
+            
+            <div class="flex-grow overflow-y-auto p-4 space-y-6">
+                <div>
+                    <h3 class="font-semibold mb-2">1. 导出目标</h3>
+                    <p class="text-sm text-gray-400 mb-2">将导出左侧所有<strong class="text-blue-400">勾选</strong>的会话。</p>
+                    <select id="export-mode" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="individual">为每个会话生成独立文件</option>
+                        <option value="timeline">将所有会话合并为一个时间线文件</option>
+                    </select>
+                </div>
+                <div>
+                    <h3 class="font-semibold mb-2">2. 时间范围 (可选)</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label for="start-time" class="text-sm">开始时间</label>
+                            <input type="datetime-local" id="start-time" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm mt-1">
+                        </div>
+                        <div>
+                            <label for="end-time" class="text-sm">结束时间</label>
+                            <input type="datetime-local" id="end-time" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1 text-sm mt-1">
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-semibold mb-2">3. 导出选项</h3>
+                    <div class="space-y-2" id="export-options-container">
+                        <!-- Options populated by JS -->
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-700 pt-4">
+                     <h3 class="font-semibold mb-2">4. 高级功能</h3>
+                     <button id="raw-export-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">
+                        高级数据导出 (选择表/列)
+                    </button>
+                </div>
+
+            </div>
+
+            <div class="flex-shrink-0 p-4 space-y-4 border-t border-gray-700">
+                 <div>
+                    <button id="start-export-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed">
+                        开始导出
+                    </button>
+                    <p class="text-xs text-gray-400 mt-2">
+                        工作目录: <code id="workdir-path" class="bg-gray-700 px-1 rounded">...</code>
+                    </p>
+                </div>
+                <div>
+                    <h3 class="font-semibold mb-2 text-sm">状态日志</h3>
+                    <div id="status-log" class="w-full h-32 bg-gray-900 border border-gray-600 rounded-md p-2 text-sm font-mono overflow-auto text-gray-300">
+                        等待操作...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Export Modal -->
+    <div id="custom-export-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl h-[90vh] flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex-shrink-0 flex justify-between items-center">
+                <h3 class="text-xl font-bold">自定义 <span id="custom-format-label"></span> 导出字段</h3>
+                 <button id="close-modal-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="p-4 flex-grow overflow-hidden flex flex-col">
+                <div class="mb-4">
+                     <label for="custom-fields-input" class="block text-sm font-medium text-gray-300 mb-1">导出字段 (可拖动排序，或在此处输入)</label>
+                     <input type="text" id="custom-fields-input" placeholder="在此处输入字段名, 以英文逗号分隔" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div id="selected-fields-container" class="min-h-[60px] overflow-y-auto bg-gray-900 p-2 rounded border border-gray-700 flex flex-wrap content-start">
+                    </div>
+                </div>
+                 <div class="flex-grow flex flex-col overflow-hidden">
+                    <h4 class="font-semibold mb-2 text-sm text-gray-300">可用字段 (可拖动到上方)</h4>
+                    <div id="field-filter-tags" class="flex-shrink-0 mb-2 flex flex-wrap gap-2">
+                        <!-- Filter tags will be injected here -->
+                    </div>
+                    <div id="available-fields-container" class="flex-grow overflow-y-auto bg-gray-900 p-2 rounded border border-gray-700 flex flex-wrap content-start">
+                         <div class="text-center w-full p-4 text-gray-500">正在加载字段...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-700 flex justify-end space-x-4 flex-shrink-0">
+                <button id="cancel-custom-export" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">取消</button>
+                <button id="save-custom-export" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">保存配置</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Raw Data Export Modal -->
+    <div id="raw-export-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-6xl h-[90vh] flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex-shrink-0 flex justify-between items-center">
+                <h3 class="text-xl font-bold">高级数据导出</h3>
+                <button id="close-raw-modal-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="p-4 flex-grow overflow-hidden grid grid-cols-2 gap-4">
+                <!-- Left: Controls -->
+                <div class="flex flex-col space-y-4">
+                    <div>
+                        <label for="raw-db-select" class="block text-sm font-medium text-gray-300 mb-1">1. 选择数据库</label>
+                        <select id="raw-db-select" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                    </div>
+                    <div>
+                        <label for="raw-table-select" class="block text-sm font-medium text-gray-300 mb-1">2. 选择数据表</label>
+                        <select id="raw-table-select" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                    </div>
+                     <div>
+                        <label for="raw-export-format" class="block text-sm font-medium text-gray-300 mb-1">3. 导出格式</label>
+                        <select id="raw-export-format" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="csv">CSV</option>
+                            <option value="json">JSON</option>
+                            <option value="md">Markdown</option>
+                            <option value="txt">纯文本</option>
+                        </select>
+                    </div>
+                     <div class="flex items-center justify-between option-item p-2 rounded-md">
+                        <label for="raw-parse-protobuf" class="text-gray-300 cursor-pointer text-sm">解析Protobuf字段 (否则输出Base64)</label>
+                        <div class="relative flex-shrink-0">
+                            <input type="checkbox" id="raw-parse-protobuf" checked class="toggle-checkbox sr-only"/>
+                            <label for="raw-parse-protobuf" class="toggle-label"></label>
+                        </div>
+                    </div>
+                </div>
+                <!-- Right: Field Selection -->
+                <div class="flex flex-col overflow-hidden">
+                    <h4 class="font-semibold mb-2 text-sm text-gray-300">4. 选择要导出的列 (可拖动)</h4>
+                    <div class="grid grid-cols-2 gap-2 h-full overflow-hidden">
+                        <div class="flex flex-col h-full">
+                             <h5 class="text-center text-xs text-gray-400 mb-1">可用列</h5>
+                            <div id="raw-available-fields-container" class="flex-grow overflow-y-auto bg-gray-900 p-2 rounded border border-gray-700 flex flex-wrap content-start"></div>
+                        </div>
+                         <div class="flex flex-col h-full">
+                             <h5 class="text-center text-xs text-gray-400 mb-1">已选列</h5>
+                            <div id="raw-selected-fields-container" class="flex-grow overflow-y-auto bg-gray-900 p-2 rounded border border-gray-700 flex flex-wrap content-start"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-700 flex justify-end space-x-4 flex-shrink-0">
+                <button id="cancel-raw-export" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">取消</button>
+                <button id="start-raw-export" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md">开始导出原始数据</button>
+            </div>
+        </div>
+    </div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Hoisted variable declarations
+    let ws;
+    let myUid = '';
+    let friendData = {};
+    let groupData = {};
+    let dbInfo = {};
+    let currentConfig = {};
+    let currentView = 'friends';
+    let activeChat = { type: null, id: null };
+    let availableDbFields = []; 
+    let customExportConfig = { format: null, fields: [] };
+    let isUpdatingFromInput = false;
+    let isUpdatingFromSortable = false;
+
+    // Chat loading state
+    let isLoadingMore = false;
+    let hasMoreHistory = true;
+    let isLoadAllMode = false;
+    let fullChatHistory = [];
+    let filteredChatHistory = [];
+    let messagePromise = {};
+    
+    // Virtual Scroll constants
+    const VIRTUAL_ROW_HEIGHT = 85; // Average height of a message bubble. Adjust if needed.
+    const OVERSCAN_COUNT = 8;
+    let virtualScrollRafId = null;
+
+    // DOM Elements
+    const statusDot = document.getElementById('status-dot');
+    const connectionStatus = document.getElementById('connection-status');
+    const contactList = document.getElementById('contact-list');
+    const chatTitle = document.getElementById('chat-title');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatMessagesSizer = document.getElementById('chat-messages-sizer');
+    const chatMessagesContent = document.getElementById('chat-messages-content');
+    const chatPlaceholder = document.getElementById('chat-placeholder');
+    const chatLoader = document.getElementById('chat-loader');
+    const startExportBtn = document.getElementById('start-export-btn');
+    const statusLog = document.getElementById('status-log');
+    const searchInput = document.getElementById('search-contact');
+    const workdirPath = document.getElementById('workdir-path');
+    const selectionCount = document.getElementById('selection-count');
+    const showFriendsBtn = document.getElementById('show-friends-btn');
+    const showGroupsBtn = document.getElementById('show-groups-btn');
+    const openAnalyzerBtn = document.getElementById('open-analyzer-btn');
+    const listControls = document.getElementById('list-controls');
+    const expandAllBtn = document.getElementById('expand-all-btn');
+    const collapseAllBtn = document.getElementById('collapse-all-btn');
+    const selectAllGroupsBtn = document.getElementById('select-all-groups-btn');
+    const chatDatePicker = document.getElementById('chat-date-picker');
+    const chatSearch = document.getElementById('chat-search');
+    const loadModeToggle = document.getElementById('load-mode-toggle');
+
+
+    // Modal Elements
+    const customExportModal = document.getElementById('custom-export-modal');
+    const availableFieldsContainer = document.getElementById('available-fields-container');
+    const selectedFieldsContainer = document.getElementById('selected-fields-container');
+    const customFieldsInput = document.getElementById('custom-fields-input');
+    const cancelCustomExportBtn = document.getElementById('cancel-custom-export');
+    const saveCustomExportBtn = document.getElementById('save-custom-export');
+    const customFormatLabel = document.getElementById('custom-format-label');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const fieldFilterTagsContainer = document.getElementById('field-filter-tags');
+
+    // Raw Export Modal Elements
+    const rawExportBtn = document.getElementById('raw-export-btn');
+    const rawExportModal = document.getElementById('raw-export-modal');
+    const closeRawModalBtn = document.getElementById('close-raw-modal-btn');
+    const rawDbSelect = document.getElementById('raw-db-select');
+    const rawTableSelect = document.getElementById('raw-table-select');
+    const rawAvailableFieldsContainer = document.getElementById('raw-available-fields-container');
+    const rawSelectedFieldsContainer = document.getElementById('raw-selected-fields-container');
+    const cancelRawExportBtn = document.getElementById('cancel-raw-export');
+    const startRawExportBtn = document.getElementById('start-raw-export');
+
+    function updateConnectionStatus(isConnected) {
+        statusDot.className = `status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`;
+        connectionStatus.textContent = isConnected ? '已连接' : '未连接';
+    }
+
+    function logMessage(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const colorClass = type === 'error' ? 'text-red-400' : (type === 'success' ? 'text-green-400' : 'text-gray-300');
+        statusLog.innerHTML += `<div class="${colorClass}"><span class="text-gray-500">${timestamp}:</span> ${message}</div>`;
+        statusLog.scrollTop = statusLog.scrollHeight;
+    }
+
+    function handleServerMessage(data) {
+        console.log('Received:', data);
+        if (data.type === 'chat_history' && messagePromise.resolve) {
+             messagePromise.resolve(data);
+             return;
+        }
+        if (data.type === 'error' && messagePromise.reject) {
+             messagePromise.reject(new Error(data.message));
+             return;
+        }
+
+        switch (data.type) {
+            case 'initial_data':
+                myUid = data.my_uid;
+                friendData = data.friends;
+                groupData = data.groups;
+                currentConfig = data.config;
+                workdirPath.textContent = data.workdir;
+                renderCurrentView();
+                renderExportOptions();
+                logMessage('初始数据加载完毕。');
+                break;
+            case 'db_fields':
+                availableDbFields = data.fields;
+                if (!customExportModal.classList.contains('hidden')) {
+                    openCustomExportModal(customExportConfig.format); // Re-open/refresh
+                }
+                break;
+            case 'db_info':
+                dbInfo = data.data;
+                populateRawDbSelect();
+                break;
+            case 'chat_history':
+                renderChatHistoryChunk(data);
+                hasMoreHistory = data.history.length > 0;
+                isLoadingMore = false;
+                break;
+            case 'config_saved':
+                logMessage('配置已成功保存到服务器。', 'success');
+                break;
+            case 'export_status':
+                logMessage(data.message);
+                break;
+            case 'export_complete':
+            case 'export_error':
+            case 'error':
+                logMessage(data.message, data.type.includes('error') ? 'error' : 'success');
+                startExportBtn.disabled = false;
+                startExportBtn.textContent = '开始导出';
+                startRawExportBtn.disabled = false;
+                startRawExportBtn.textContent = '开始导出原始数据';
+                break;
+        }
+    }
+
+    function connect() {
+        ws = new WebSocket('ws://localhost:8765');
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            updateConnectionStatus(true);
+            logMessage('连接服务器成功！正在请求初始数据...');
+            ws.send(JSON.stringify({ command: 'get_initial_data' }));
+            ws.send(JSON.stringify({ command: 'get_db_fields' }));
+            messagePromise = {};
+        };
+        ws.onmessage = (event) => handleServerMessage(JSON.parse(event.data));
+        ws.onclose = () => {
+            console.log('WebSocket disconnected. Reconnecting...');
+            updateConnectionStatus(false);
+            logMessage('与服务器断开连接。正在尝试重新连接...', 'error');
+            setTimeout(connect, 3000);
+        };
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            updateConnectionStatus(false);
+            logMessage('WebSocket连接出错。请确保服务器已启动。', 'error');
+            ws.close();
+        };
+    }
+    
+    function renderCurrentView() {
+        const filter = searchInput.value;
+        expandAllBtn.classList.toggle('hidden', currentView !== 'friends');
+        collapseAllBtn.classList.toggle('hidden', currentView !== 'friends');
+        selectAllGroupsBtn.classList.toggle('hidden', currentView !== 'groups');
+
+        if (currentView === 'friends') {
+            renderFriendList(filter);
+        } else {
+            renderGroupList(filter);
+        }
+    }
+
+    function renderFriendList(filter = '') {
+        contactList.innerHTML = '';
+        const lowerFilter = filter.toLowerCase();
+
+        Object.entries(friendData).forEach(([gid, group]) => {
+            const filteredUsers = group.users.filter(u => 
+                (u.nickname && u.nickname.toLowerCase().includes(lowerFilter)) ||
+                (u.remark && u.remark.toLowerCase().includes(lowerFilter)) ||
+                (u.qq && String(u.qq).toLowerCase().includes(lowerFilter))
+            );
+            
+            if (filter && filteredUsers.length === 0) return;
+
+            const details = document.createElement('details');
+            details.open = true;
+            details.className = 'mb-2 friend-group-details';
+            
+            const summary = document.createElement('summary');
+            summary.className = 'font-semibold text-lg cursor-pointer p-2 hover:bg-gray-700 rounded-md flex items-center';
+            summary.innerHTML = `<input type="checkbox" class="group-checkbox mr-3 h-4 w-4 flex-shrink-0" data-gid="${gid}"> <span>${group.name} (${group.users.length})</span>`;
+            details.appendChild(summary);
+
+            const userList = document.createElement('div');
+            userList.className = 'ml-4 border-l-2 border-gray-600 pl-4 space-y-1';
+            const usersToShow = filter ? filteredUsers : group.users;
+            usersToShow.forEach(user => {
+                const displayName = user.remark ? `${user.remark} (${user.nickname || user.qq})` : (user.nickname || user.qq);
+                const subText = `QQ: ${user.qq}`;
+                userList.appendChild(createContactItem('friend', user.uid, gid, displayName, subText));
+            });
+            details.appendChild(userList);
+            contactList.appendChild(details);
+        });
+        addCheckboxListeners();
+    }
+    
+    function renderGroupList(filter = '') {
+        contactList.innerHTML = '';
+        const lowerFilter = filter.toLowerCase();
+        
+        const filteredGroups = groupData.filter(g => 
+            g.name.toLowerCase().includes(lowerFilter) || 
+            String(g.id).includes(lowerFilter) ||
+            String(g.uin).includes(lowerFilter)
+        );
+
+        filteredGroups.forEach(group => {
+            const title = `${group.name} (${group.member_count}/${group.max_member_count})`;
+            const subText = `ID: ${group.uin}`;
+            contactList.appendChild(createContactItem('group', group.id, 'all_groups', title, subText));
+        });
+        addCheckboxListeners();
+    }
+
+    function createContactItem(type, id, groupId, title, subtitle) {
+        const itemContainer = document.createElement('div');
+        itemContainer.className = `contact-item-container flex items-center justify-between p-2 my-1 rounded-md transition-colors duration-200`;
+        
+        const label = document.createElement('label');
+        label.className = 'flex items-center cursor-pointer w-full hover:bg-gray-600 rounded-md p-1';
+        label.innerHTML = `
+            <input type="checkbox" class="contact-checkbox mr-3 h-4 w-4 flex-shrink-0" data-type="${type}" data-id="${id}" data-gid="${groupId}">
+            <div>
+                <div class="font-medium text-sm">${title}</div>
+                ${subtitle ? `<div class="text-xs text-gray-400">${subtitle}</div>` : ''}
+            </div>
+        `;
+
+        const buttonsDiv = document.createElement('div');
+        buttonsDiv.className = 'flex-shrink-0 ml-2 space-x-1';
+
+        const previewButton = document.createElement('button');
+        previewButton.textContent = '预览';
+        previewButton.className = 'text-xs bg-gray-600 hover:bg-blue-600 px-2 py-1 rounded-md';
+        
+        // [修复] 恢复旧版本的onclick逻辑
+        previewButton.onclick = async (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.contact-item-container.active').forEach(el => el.classList.remove('active'));
+            itemContainer.classList.add('active');
+            chatTitle.textContent = title;
+            activeChat = { type, id };
+            messagePromise = {}; // Reset promise handler to fix mode switching bug
+            hasMoreHistory = true;
+            isLoadingMore = false;
+            
+            chatPlaceholder.classList.add('hidden');
+            chatLoader.classList.remove('hidden');
+
+            chatMessages.removeEventListener('scroll', handleInfiniteScroll);
+            chatMessages.removeEventListener('scroll', handleVirtualScroll);
+            
+            if (isLoadAllMode) {
+                 try {
+                    fullChatHistory = await fetchAllChatHistory(type, id);
+                    filteredChatHistory = [...fullChatHistory];
+                    chatSearch.value = '';
+                    setupVirtualScroll(filteredChatHistory);
+                } catch (error) {
+                    logMessage(`加载全部记录失败: ${error.message}`, 'error');
+                    chatLoader.innerHTML = `加载失败: ${error.message}`;
+                }
+            } else {
+                // Restore styles for normal infinite scroll flow by removing inline styles
+                chatMessagesSizer.removeAttribute('style');
+                chatMessagesContent.removeAttribute('style');
+
+                chatMessagesContent.innerHTML = '';
+                chatLoader.innerHTML = '正在加载聊天记录...';
+                ws.send(JSON.stringify({ command: 'get_chat_history', type: type, id: id }));
+                chatMessages.addEventListener('scroll', handleInfiniteScroll);
+            }
+        };
+        buttonsDiv.appendChild(previewButton);
+        
+        const analyzeButton = document.createElement('button');
+        analyzeButton.textContent = '分析';
+        analyzeButton.className = 'text-xs bg-purple-600 hover:bg-purple-500 px-2 py-1 rounded-md';
+        analyzeButton.onclick = (e) => {
+            e.stopPropagation();
+            const url = `/ark-invest?type=${type}&id=${id}`;
+            window.open(url, '_blank');
+        };
+        buttonsDiv.appendChild(analyzeButton);
+
+
+        if (type === 'group') {
+            const dropdown = document.createElement('div');
+            dropdown.className = 'dropdown';
+            dropdown.innerHTML = `
+                <button class="text-xs bg-teal-600 hover:bg-teal-500 px-2 py-1 rounded-md">更多操作 ▼</button>
+                <div class="dropdown-content">
+                    <a href="#" data-action="members">导出成员</a>
+                    <a href="#" data-action="bulletins">导出公告</a>
+                    <a href="#" data-action="essences">精华消息</a>
+                    <a href="#" data-action="notifications">成员变更</a>
+                </div>
+            `;
+            dropdown.querySelectorAll('.dropdown-content a').forEach(a => {
+                a.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const action = e.target.dataset.action;
+                    logMessage(`请求导出群[${id}]的 ${e.target.textContent}...`);
+                    ws.send(JSON.stringify({ command: 'export_extra_group_data', group_id: id, data_type: action }));
+                };
+            });
+            buttonsDiv.appendChild(dropdown);
+        }
+
+        itemContainer.appendChild(label);
+        itemContainer.appendChild(buttonsDiv);
+        return itemContainer;
+    }
+
+
+    function addCheckboxListeners() {
+        document.querySelectorAll('.group-checkbox').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                const gid = e.target.dataset.gid;
+                document.querySelectorAll(`.contact-checkbox[data-gid="${gid}"]`).forEach(userCb => {
+                    userCb.checked = e.target.checked;
+                });
+                updateSelectionCount();
+            });
+        });
+        document.querySelectorAll('.contact-checkbox').forEach(cb => cb.addEventListener('change', updateSelectionCount));
+    }
+    
+    function updateSelectionCount() {
+        const count = document.querySelectorAll('.contact-checkbox:checked').length;
+        selectionCount.textContent = `已选: ${count}`;
+        if (currentView === 'friends') {
+            document.querySelectorAll('.group-checkbox').forEach(gcb => {
+                const gid = gcb.dataset.gid;
+                const allUsersInGroup = document.querySelectorAll(`.contact-checkbox[data-gid="${gid}"]`);
+                if (allUsersInGroup.length === 0) return;
+                const checkedUsers = document.querySelectorAll(`.contact-checkbox[data-gid="${gid}"]:checked`);
+                gcb.checked = allUsersInGroup.length === checkedUsers.length;
+                gcb.indeterminate = !gcb.checked && checkedUsers.length > 0;
+            });
+        }
+    }
+
+    function createMessageNode(msg) {
+        const msgContainer = document.createElement('div');
+        msgContainer.dataset.ts = msg.ts;
+        msgContainer.dataset.text = msg.text.toLowerCase();
+        
+        if(msg.is_system_tip) {
+            msgContainer.className = 'flex justify-center my-2';
+            msgContainer.innerHTML = `<div class="system-message text-center text-sm bg-gray-700 px-3 py-1 rounded-full">${msg.text}</div>`;
+        } else {
+            const isSelf = msg.s_uid === myUid;
+            msgContainer.className = `flex ${isSelf ? 'justify-end' : 'justify-start'}`;
+            const bubble = document.createElement('div');
+            bubble.className = `chat-bubble p-3 rounded-lg ${isSelf ? 'chat-bubble-self' : 'chat-bubble-other'}`;
+            
+            const title = msg.title || 'Member';
+            const level = (msg.level !== null && msg.level !== undefined) ? msg.level : 'NULL';
+            const groupTagsHTML = !isSelf && activeChat.type === 'group' ? `
+                <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-600 text-white">${title}</span>
+                <span class="ml-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-green-600 text-white">Lv.${level}</span>
+            ` : '';
+
+            const senderHTML = !isSelf ? `
+                <div class="text-xs text-blue-300 mb-1 flex items-center">
+                    <span>${msg.sender_name}</span>
+                    ${groupTagsHTML}
+                </div>` : '';
+
+            bubble.innerHTML = `
+                ${senderHTML}
+                <div class="text-sm message-text-content">${msg.text}</div>
+                <div class="text-xs text-gray-300 mt-1 text-right">${new Date(msg.ts * 1000).toLocaleString()}</div>
+            `;
+            msgContainer.appendChild(bubble);
+        }
+        return msgContainer;
+    }
+
+    function renderChatHistoryChunk(data) {
+        const { history, prepend, is_date_jump } = data;
+        chatLoader.classList.add('hidden');
+
+        if (!prepend && history.length === 0) {
+            chatMessagesContent.innerHTML = '';
+            chatPlaceholder.classList.remove('hidden');
+            chatPlaceholder.querySelector('p').textContent = '没有找到该会话的聊天记录。';
+            return;
+        }
+
+        if (!prepend) chatPlaceholder.classList.add('hidden');
+
+        const fragment = document.createDocumentFragment();
+        history.forEach(msg => fragment.appendChild(createMessageNode(msg)));
+
+        if (prepend) {
+            const oldScrollHeight = chatMessages.scrollHeight;
+            chatMessagesContent.prepend(fragment);
+            chatMessages.scrollTop = chatMessages.scrollHeight - oldScrollHeight;
+        } else {
+            if (is_date_jump) chatMessagesContent.innerHTML = '';
+            chatMessagesContent.appendChild(fragment);
+            if (is_date_jump) {
+                chatMessages.scrollTop = 0;
+            } else {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+    }
+
+    function renderExportOptions() {
+        const container = document.getElementById('export-options-container');
+        container.innerHTML = `
+             <div class="flex items-center justify-between option-item p-2 rounded-md">
+                <label for="cfg-export_format" class="text-gray-300 text-sm">导出格式</label>
+                <select id="cfg-export_format" class="config-item bg-gray-700 border border-gray-600 rounded-md px-2 py-1 text-sm">
+                    <option value="txt">纯文本 (.txt)</option> 
+                    <option value="md">Markdown (.md)</option> 
+                    <option value="html">网页文件 (.html)</option>
+                    <option value="json-custom">自定义 JSON...</option>
+                    <option value="csv-custom">自定义 CSV...</option>
+                </select>
+            </div>
+            ${createToggleOption('show_recall', '显示撤回提示')}
+            ${createToggleOption('show_recall_suffix', '显示个性化撤回提示')}
+            ${createToggleOption('show_poke', '显示戳一戳/拍一拍')}
+            ${createToggleOption('show_voice_to_text', '显示语音转文字')}
+            ${createToggleOption('show_media_info', '在消息中显示媒体信息')}
+            ${createToggleOption('export_non_friends', '导出非好友/临时会话')}
+            ${createToggleOption('add_file_header', '在文件顶部添加摘要头')}
+            ${createToggleOption('parse_protobuf_fields', '解析消息内容字段 (对JSON/CSV有效)', true)}
+            ${createToggleOption('create_group_dirs', '按好友分组创建子目录', true, 'friends')}
+        `;
+        document.querySelectorAll('.config-item').forEach(el => {
+            const key = el.id.replace('cfg-', '');
+            if (el.type === 'checkbox') el.checked = currentConfig[key] === undefined ? el.hasAttribute('checked') : currentConfig[key];
+            else el.value = currentConfig[key] || 'md';
+            el.addEventListener('change', updateConfig);
+        });
+        document.getElementById('cfg-export_format').addEventListener('change', handleFormatChange);
+        toggleGroupDirOption();
+    }
+    
+    function createToggleOption(key, label, defaultChecked = false, visibilityClass = '') {
+        return `
+            <div class="option-item flex justify-between items-center p-2 rounded-md ${visibilityClass}" id="container-${key}">
+                <label for="cfg-${key}" class="text-gray-300 cursor-pointer text-sm">${label}</label>
+                <div class="relative flex-shrink-0">
+                    <input type="checkbox" id="cfg-${key}" ${defaultChecked ? 'checked' : ''} class="config-item toggle-checkbox sr-only"/>
+                    <label for="cfg-${key}" class="toggle-label"></label>
+                </div>
+            </div>`;
+    }
+
+    function updateConfig(event) {
+        const el = event.target;
+        const key = el.id.replace('cfg-', '');
+        currentConfig[key] = el.type === 'checkbox' ? el.checked : el.value;
+        const configToSave = {...currentConfig};
+        delete configToSave.create_group_dirs; // This is a UI-only option
+        ws.send(JSON.stringify({ command: 'save_config', config: configToSave }));
+        logMessage(`配置项 [${key}] 已更新。`);
+    }
+
+    function handleExport() {
+        const selected = document.querySelectorAll('.contact-checkbox:checked');
+        if (selected.length === 0) {
+            alert('请在左侧勾选至少一个要导出的会话！');
+            return;
+        }
+
+        const exportMode = document.getElementById('export-mode').value;
+        const exportFormat = document.getElementById('cfg-export_format').value;
+        
+        if (exportMode === 'timeline' && exportFormat.includes('custom')) {
+            alert('“时间线”模式不支持自定义格式导出，请选择独立文件模式。');
+            return;
+        }
+        
+        if (exportFormat.includes('custom') && (!customExportConfig.fields || customExportConfig.fields.length === 0)) {
+            alert('请先通过 "自定义 JSON/CSV..." 选项配置您要导出的字段。');
+            handleFormatChange({target: document.getElementById('cfg-export_format')});
+            return;
+        }
+
+        const targets = Array.from(selected).map(cb => ({ type: cb.dataset.type, id: cb.dataset.id }));
+        const startTime = document.getElementById('start-time').value;
+        const endTime = document.getElementById('end-time').value;
+        const createGroupDirs = document.getElementById('cfg-create_group_dirs').checked;
+        const parseProtobuf = document.getElementById('cfg-parse_protobuf_fields').checked;
+        
+        const params = {
+            mode: exportMode,
+            targets: targets,
+            time_range: {
+                start: startTime ? new Date(startTime).getTime() / 1000 : null,
+                end: endTime ? new Date(endTime).getTime() / 1000 : null
+            },
+            create_group_dirs: createGroupDirs && currentView === 'friends',
+            export_format: exportFormat,
+            parse_protobuf_fields: parseProtobuf,
+            custom_fields: (exportFormat.includes('custom')) ? customExportConfig.fields : null
+        };
+
+        logMessage(`请求导出... 模式: ${params.mode}, 会话数: ${targets.length}`);
+        ws.send(JSON.stringify({ command: 'start_export', params }));
+        startExportBtn.disabled = true;
+        startExportBtn.textContent = '正在导出...';
+    }
+    
+    function toggleGroupDirOption() {
+        const groupDirOption = document.getElementById('container-create_group_dirs');
+        if (groupDirOption) {
+            groupDirOption.style.display = currentView === 'friends' ? 'flex' : 'none';
+        }
+    }
+    
+    function handleFormatChange(e) {
+        const format = e.target.value;
+        if (format.includes('custom')) {
+            openCustomExportModal(format);
+        }
+    }
+
+    // New "Load All" mode functions
+    async function fetchAllChatHistory(type, id) {
+        let allHistory = [];
+        let lastTimestamp = null;
+        let keepFetching = true;
+        let fetchedCount = 0;
+
+        chatLoader.innerHTML = '正在加载全部聊天记录...';
+        chatLoader.classList.remove('hidden');
+        chatPlaceholder.classList.add('hidden');
+        chatMessagesContent.innerHTML = '';
+
+
+        while (keepFetching) {
+            const data = await new Promise((resolve, reject) => {
+                messagePromise = { resolve, reject };
+                ws.send(JSON.stringify({ command: 'get_chat_history', type, id, before_ts: lastTimestamp }));
+            });
+            const chunk = data.history;
+
+            if (chunk && chunk.length > 0) {
+                allHistory.unshift(...chunk);
+                lastTimestamp = chunk[0].ts;
+                fetchedCount += chunk.length;
+                chatLoader.innerHTML = `正在加载全部聊天记录... 已获取 ${fetchedCount} 条`;
+            } else {
+                keepFetching = false;
+            }
+        }
+        return allHistory;
+    }
+
+    // New Virtual Scroll functions
+    function setupVirtualScroll(records) {
+        // Explicitly set all styles needed for virtual scrolling
+        chatMessagesSizer.style.cssText = 'position: relative; overflow: hidden; width: 100%;';
+        chatMessagesContent.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%;';
+
+        chatMessagesSizer.style.height = `${records.length * VIRTUAL_ROW_HEIGHT}px`;
+        
+        chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom initially
+        chatMessages.addEventListener('scroll', handleVirtualScroll);
+        
+        handleVirtualScroll();
+        chatLoader.classList.add('hidden');
+
+        if(records.length === 0) {
+            chatPlaceholder.classList.remove('hidden');
+            chatPlaceholder.querySelector('p').textContent = '没有找到该会话的聊天记录。';
+        } else {
+            chatPlaceholder.classList.add('hidden');
+        }
+    }
+    
+    function handleVirtualScroll() {
+        if (virtualScrollRafId) {
+            cancelAnimationFrame(virtualScrollRafId);
+        }
+        virtualScrollRafId = requestAnimationFrame(renderVisibleMessages);
+    }
+
+    function renderVisibleMessages() {
+        const scrollTop = chatMessages.scrollTop;
+        const containerHeight = chatMessages.clientHeight;
+
+        const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_ROW_HEIGHT) - OVERSCAN_COUNT);
+        const endIndex = Math.min(filteredChatHistory.length, Math.ceil((scrollTop + containerHeight) / VIRTUAL_ROW_HEIGHT) + OVERSCAN_COUNT);
+
+        const fragment = document.createDocumentFragment();
+        for (let i = startIndex; i < endIndex; i++) {
+            fragment.appendChild(createMessageNode(filteredChatHistory[i]));
+        }
+
+        chatMessagesContent.innerHTML = '';
+        chatMessagesContent.appendChild(fragment);
+        chatMessagesContent.style.transform = `translateY(${startIndex * VIRTUAL_ROW_HEIGHT}px)`;
+    }
+    
+    // Main Event Listeners
+    searchInput.addEventListener('input', () => renderCurrentView());
+    startExportBtn.addEventListener('click', handleExport);
+    showFriendsBtn.addEventListener('click', () => {
+        currentView = 'friends';
+        showFriendsBtn.classList.add('active');
+        showGroupsBtn.classList.remove('active');
+        renderCurrentView();
+        toggleGroupDirOption();
+    });
+    showGroupsBtn.addEventListener('click', () => {
+        currentView = 'groups';
+        showGroupsBtn.classList.add('active');
+        showFriendsBtn.classList.remove('active');
+        renderCurrentView();
+        toggleGroupDirOption();
+    });
+    openAnalyzerBtn.addEventListener('click', () => {
+        window.open('/ark-invest', '_blank');
+    });
+    expandAllBtn.addEventListener('click', () => document.querySelectorAll('.friend-group-details').forEach(d => d.open = true));
+    collapseAllBtn.addEventListener('click', () => document.querySelectorAll('.friend-group-details').forEach(d => d.open = false));
+    selectAllGroupsBtn.addEventListener('click', () => {
+        const allGroupCheckboxes = document.querySelectorAll('.contact-checkbox[data-type="group"]');
+        if (allGroupCheckboxes.length === 0) return;
+        const allSelected = Array.from(allGroupCheckboxes).every(cb => cb.checked);
+        allGroupCheckboxes.forEach(cb => cb.checked = !allSelected);
+        updateSelectionCount();
+    });
+
+    const handleInfiniteScroll = () => {
+        if (chatMessages.scrollTop === 0 && !isLoadingMore && hasMoreHistory && activeChat.id) {
+            isLoadingMore = true;
+            const oldestMessage = chatMessagesContent.querySelector('div[data-ts]');
+            const beforeTs = oldestMessage ? oldestMessage.dataset.ts : null;
+            if (beforeTs) ws.send(JSON.stringify({ command: 'get_chat_history', type: activeChat.type, id: activeChat.id, before_ts: beforeTs}));
+        }
+    };
+
+    chatDatePicker.addEventListener('change', () => {
+        if (!activeChat.id) return;
+        const fromTs = chatDatePicker.value ? new Date(chatDatePicker.valueAsNumber).getTime() / 1000 : null;
+        
+        chatLoader.classList.remove('hidden');
+        chatLoader.innerHTML = `正在${fromTs ? '跳转到指定日期' : '加载最新记录'}...`;
+        chatPlaceholder.classList.add('hidden');
+        chatMessagesContent.innerHTML = '';
+
+        if (isLoadAllMode) {
+             const activeItem = document.querySelector('.contact-item-container.active');
+             if (activeItem) {
+                activeItem.querySelector('button').click(); 
+             }
+        } else {
+             hasMoreHistory = true;
+             ws.send(JSON.stringify({ command: 'get_chat_history', type: activeChat.type, id: activeChat.id, from_ts: fromTs, is_date_jump: true }));
+        }
+    });
+    
+    chatSearch.addEventListener('input', () => {
+        const query = chatSearch.value.toLowerCase();
+        if (isLoadAllMode) {
+            if (!query) {
+                filteredChatHistory = [...fullChatHistory];
+            } else {
+                filteredChatHistory = fullChatHistory.filter(msg => 
+                    msg.text.toLowerCase().includes(query) || 
+                    (msg.sender_name && msg.sender_name.toLowerCase().includes(query))
+                );
+            }
+            setupVirtualScroll(filteredChatHistory);
+        } else {
+            chatMessagesContent.querySelectorAll('div[data-ts]').forEach(msgWrapper => {
+                const text = msgWrapper.dataset.text || '';
+                const sender = msgWrapper.querySelector('.text-blue-300 span')?.textContent.toLowerCase() || '';
+                const isVisible = text.includes(query) || sender.includes(query);
+                msgWrapper.classList.toggle('hidden', !isVisible);
+            });
+        }
+    });
+
+    loadModeToggle.addEventListener('change', (e) => {
+        isLoadAllMode = e.target.checked;
+        const activeItem = document.querySelector('.contact-item-container.active');
+        if (activeItem) {
+            activeItem.querySelector('button').click();
+        }
+    });
+
+    // Modal Logic
+    Sortable.create(availableFieldsContainer, { 
+        group: 'fields', 
+        animation: 150,
+        onEnd: updateFieldsInputFromSortable,
+    });
+    Sortable.create(selectedFieldsContainer, {
+        group: 'fields',
+        animation: 150,
+        onEnd: updateFieldsInputFromSortable,
+    });
+    customFieldsInput.addEventListener('input', updateSortableFromInput);
+    saveCustomExportBtn.addEventListener('click', () => {
+        customExportConfig.fields = Array.from(selectedFieldsContainer.children).map(chip => chip.dataset.field);
+        logMessage(`自定义 ${customExportConfig.format.toUpperCase()} 导出配置已保存: ${customExportConfig.fields.length}个字段`, 'success');
+        customExportModal.classList.add('hidden');
+    });
+    const closeAndResetModal = () => {
+        customExportModal.classList.add('hidden');
+        document.getElementById('cfg-export_format').value = currentConfig.export_format || 'md';
+    };
+    cancelCustomExportBtn.addEventListener('click', closeAndResetModal);
+    closeModalBtn.addEventListener('click', closeAndResetModal);
+    
+    // Raw Export Modal Logic
+    rawExportBtn.addEventListener('click', () => {
+        ws.send(JSON.stringify({ command: 'get_db_info' }));
+        rawExportModal.classList.remove('hidden');
+    });
+    closeRawModalBtn.addEventListener('click', () => rawExportModal.classList.add('hidden'));
+    cancelRawExportBtn.addEventListener('click', () => rawExportModal.classList.add('hidden'));
+    
+    function populateRawDbSelect() {
+        rawDbSelect.innerHTML = '';
+        Object.keys(dbInfo).forEach(dbName => {
+            const option = document.createElement('option');
+            option.value = dbName;
+            option.textContent = dbName;
+            rawDbSelect.appendChild(option);
+        });
+        populateRawTableSelect();
+    }
+
+    function populateRawTableSelect() {
+        const selectedDb = rawDbSelect.value;
+        rawTableSelect.innerHTML = '';
+        if (selectedDb && dbInfo[selectedDb]) {
+            dbInfo[selectedDb].forEach(table => {
+                const option = document.createElement('option');
+                option.value = table.name;
+                option.textContent = table.name;
+                rawTableSelect.appendChild(option);
+            });
+        }
+        populateRawFieldSelect();
+    }
+    
+    function populateRawFieldSelect() {
+        const selectedDb = rawDbSelect.value;
+        const selectedTable = rawTableSelect.value;
+        rawAvailableFieldsContainer.innerHTML = '';
+        rawSelectedFieldsContainer.innerHTML = '';
+        if (selectedDb && selectedTable && dbInfo[selectedDb]) {
+            const table = dbInfo[selectedDb].find(t => t.name === selectedTable);
+            if (table) {
+                table.columns.forEach(col => {
+                    rawAvailableFieldsContainer.appendChild(createFieldChip(col));
+                });
+            }
+        }
+    }
+
+    rawDbSelect.addEventListener('change', populateRawTableSelect);
+    rawTableSelect.addEventListener('change', populateRawFieldSelect);
+    
+    Sortable.create(rawAvailableFieldsContainer, { group: 'raw_fields', animation: 150 });
+    Sortable.create(rawSelectedFieldsContainer, { group: 'raw_fields', animation: 150 });
+
+    startRawExportBtn.addEventListener('click', () => {
+        const selectedCols = Array.from(rawSelectedFieldsContainer.children).map(c => c.dataset.field);
+        if (selectedCols.length === 0) {
+            alert('请至少选择一个要导出的列！');
+            return;
+        }
+        const params = {
+            db_name: rawDbSelect.value,
+            table_name: rawTableSelect.value,
+            columns: selectedCols,
+            format: document.getElementById('raw-export-format').value,
+            parse_protobuf: document.getElementById('raw-parse-protobuf').checked
+        };
+        logMessage(`请求高级导出: ${params.db_name} -> ${params.table_name}...`);
+        ws.send(JSON.stringify({ command: 'start_raw_export', params }));
+        startRawExportBtn.disabled = true;
+        startRawExportBtn.textContent = '正在导出...';
+    });
+
+
+    connect();
+
+
+    function openCustomExportModal(format) {
+        const selectedCheckboxes = document.querySelectorAll('.contact-checkbox:checked');
+        const isGroupExport = Array.from(selectedCheckboxes).some(cb => cb.dataset.type === 'group');
+
+        renderFieldFilterTags(isGroupExport);
+
+        const formatType = format.replace('-custom', '').toUpperCase();
+        customFormatLabel.textContent = formatType;
+        customExportConfig.format = formatType.toLowerCase();
+        
+        if (!customExportConfig.fields || customExportConfig.fields.length === 0) {
+             customExportConfig.fields = [
+                '40001', '40003', '40050', '40020', '40021', '40800'
+             ];
+        }
+
+        populateSelectedFields(customExportConfig.fields);
+        populateAvailableFields({ isGroup: isGroupExport });
+        customExportModal.classList.remove('hidden');
+    }
+
+    function renderFieldFilterTags(isGroup) {
+        fieldFilterTagsContainer.innerHTML = '';
+        if (!isGroup) return;
+
+        const tags = {
+            'all': '全部',
+            'message': '消息字段',
+            'member': '成员信息',
+            'detail': '群信息',
+            'essence': '精华消息',
+            'notify': '群通知'
+        };
+        
+        Object.entries(tags).forEach(([key, text], index) => {
+            const button = document.createElement('button');
+            button.className = 'px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded-full';
+            if(index === 0) button.classList.add('active');
+            button.textContent = text;
+            button.dataset.filter = key;
+            button.onclick = () => {
+                fieldFilterTagsContainer.querySelector('.active').classList.remove('active');
+                button.classList.add('active');
+                populateAvailableFields({ isGroup: true, filter: key });
+            };
+            fieldFilterTagsContainer.appendChild(button);
+        });
+    }
+
+    function getFieldCategory(fieldName) {
+        if (fieldName.startsWith('4')) return 'message';
+        if (['1000', '1002', '20002'].includes(fieldName) || fieldName.startsWith('64')) return 'member';
+        if (fieldName.startsWith('60')) return 'detail';
+        if (fieldName.startsWith('675')) return 'essence';
+        if (fieldName.startsWith('61')) return 'notify';
+        return 'other';
+    }
+
+    function populateAvailableFields({ isGroup, filter = 'all' }) {
+        availableFieldsContainer.innerHTML = '';
+        const selectedSet = new Set(Array.from(selectedFieldsContainer.children).map(c => c.dataset.field));
+        
+        if (availableDbFields.length === 0) {
+            availableFieldsContainer.innerHTML = '<div class="text-center w-full p-4 text-gray-500">未从服务器获取到可用字段。</div>';
+            return;
+        }
+        
+        let fieldsToDisplay = availableDbFields;
+        if (!isGroup) {
+            fieldsToDisplay = availableDbFields.filter(f => !f.name.startsWith('6'));
+        }
+
+        if (isGroup && filter !== 'all') {
+            fieldsToDisplay = fieldsToDisplay.filter(f => getFieldCategory(f.name) === filter);
+        }
+
+        fieldsToDisplay.forEach(field => {
+            if (!selectedSet.has(field.name)) {
+                availableFieldsContainer.appendChild(createFieldChip(field));
+            }
+        });
+    }
+
+    function populateSelectedFields(fieldNames) {
+        selectedFieldsContainer.innerHTML = '';
+        fieldNames.forEach(fieldName => {
+            const fieldObject = availableDbFields.find(f => f.name === fieldName);
+            if (fieldObject) {
+                selectedFieldsContainer.appendChild(createFieldChip(fieldObject));
+            }
+        });
+        updateFieldsInputFromSortable();
+    }
+    
+    function createFieldChip(fieldObject) {
+        const chip = document.createElement('div');
+        chip.className = 'field-chip';
+        const descText = fieldObject.desc ? ` - ${fieldObject.desc}` : '';
+        chip.textContent = `${fieldObject.name}${descText}`;
+        chip.dataset.field = fieldObject.name;
+        return chip;
+    }
+
+    function updateFieldsInputFromSortable() {
+        if (isUpdatingFromInput) return;
+        isUpdatingFromSortable = true;
+        const fields = Array.from(selectedFieldsContainer.children).map(chip => chip.dataset.field);
+        customFieldsInput.value = fields.join(', ');
+        isUpdatingFromSortable = false;
+    }
+    
+    function updateSortableFromInput() {
+        if (isUpdatingFromSortable) return;
+        isUpdatingFromInput = true;
+        const fields = customFieldsInput.value.split(',').map(f => f.trim()).filter(f => f);
+        populateSelectedFields(fields);
+        // Refresh available fields based on current filter
+        const activeFilterBtn = fieldFilterTagsContainer.querySelector('.active');
+        const filter = activeFilterBtn ? activeFilterBtn.dataset.filter : 'all';
+        const isGroup = !fieldFilterTagsContainer.classList.contains('hidden');
+        populateAvailableFields({ isGroup, filter });
+        isUpdatingFromInput = false;
+    }
+});
+</script>
+</body>
+</html>
+

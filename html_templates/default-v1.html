@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Logs</title>
+    <style>
+        /* --- 基础与布局 --- */
+
+        /**
+         * 页面主体样式
+         */
+        body {
+            font-family: "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", "Courier", "PingFang SC", "Microsoft YaHei", monospace;
+            line-height: 1.5;
+            background-color: #f6f8fa;
+            color: #24292e;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 15px;
+            font-size: 14px;
+        }
+
+        /**
+         * 主内容容器，包裹整个归档内容
+         */
+        .container {
+            border: 1px solid #d1d5da;
+            border-radius: 6px;
+        }
+
+        /* --- 页面头部 (file_header) --- */
+
+        /**
+         * 头部区域容器，包含所有元数据信息
+         */
+        .header {
+            border-bottom: 1px solid #d1d5da;
+            padding: 16px;
+            background-color: #f1f3f5;
+            border-radius: 6px 6px 0 0;
+        }
+
+        /**
+         * 头部区域的主标题 (H1)
+         */
+        .header h1 {
+            font-size: 1.4em;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+
+        /**
+         * 头部信息分组的容器 (如数据来源、时间信息等)
+         */
+        .header-group {
+            margin-bottom: 8px;
+        }
+        .header-group:last-child {
+            margin-bottom: 0;
+        }
+
+        /**
+         * 数据来源信息分组
+         */
+        .data-source {}
+
+        /**
+         * 时间相关信息分组
+         */
+        .time-info {}
+
+        /**
+         * 范围相关信息分组 (如账号、好友范围等)
+         */
+        .scope-info {}
+
+        /**
+         * 提示信息分组
+         */
+        .hint-info {}
+
+        /**
+         * 头部区域内的段落 (p) 文本
+         */
+        .header p {
+            margin: 2px 0;
+            color: #586069;
+        }
+
+        /**
+         * 头部区域内用于显示代码或哈希值的 <code> 标签
+         */
+        .header code {
+            background-color: rgba(27, 31, 35, 0.05);
+            padding: 2px 5px;
+            font-family: inherit;
+            word-break: break-all;
+            border-radius: 3px;
+        }
+
+        /* --- 控制按钮 --- */
+
+        /**
+         * “全部展开/收起”按钮的容器
+         */
+        .controls {
+            padding: 16px;
+            border-bottom: 1px solid #d1d5da;
+            background-color: #fff;
+        }
+
+        /**
+         * 控制区域的按钮样式
+         */
+        .controls button {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            margin-right: 10px;
+            background-color: #fafbfc;
+            border: 1px solid rgba(27, 31, 35, 0.15);
+            border-radius: 6px;
+            font-weight: 600;
+        }
+
+        /* --- 聊天记录主体 (chat_content) --- */
+
+        /**
+         * 聊天记录的根容器
+         */
+        #chat-log {
+            background-color: #fff;
+            border-radius: 0 0 6px 6px;
+        }
+
+        /**
+         * 按天折叠的日期区块，使用 <details> 标签
+         */
+        .date-block {
+            margin-top: 0;
+            border: none;
+            border-bottom: 1px solid #d1d5da;
+        }
+        .date-block:last-child {
+            border-bottom: none;
+        }
+
+        /**
+         * 日期区块的标题 (如 "2025-07-02")，使用 <summary> 标签
+         */
+        .date-block summary {
+            font-size: 1em;
+            font-weight: 600;
+            padding: 10px 16px;
+            background-color: #f1f3f5;
+            cursor: pointer;
+        }
+
+        /**
+         * 单日聊天内容的容器
+         */
+        .chat-day-content {
+            padding: 0;
+        }
+
+        /**
+         * 单个发送者连续消息的组合容器
+         */
+        .sender-message-group {
+            padding: 10px 16px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+        .chat-day-content > .sender-message-group:last-child {
+            border-bottom: none;
+        }
+
+        /**
+         * 标识此消息组为“自己”发送 (可用于特殊样式)
+         */
+        .is-self {
+            background-color: #f1f8ff; /* 蓝色背景表示自己 */
+        }
+
+        /**
+         * 标识此消息组为“对方”发送 (可用于特殊样式)
+         */
+        .is-other {}
+
+        /**
+         * 每日内容中第一个消息组的特殊样式，用于调整边距
+         */
+        .sender-message-group:first-child .sender {
+            margin-top: 0;
+        }
+
+        /**
+         * 发送者昵称
+         */
+        .sender {
+            font-weight: bold;
+            margin-top: 0;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        /**
+         * 单个发送者名下所有消息块的直接容器
+         */
+        .message-block {}
+
+        /**
+         * 单条消息的容器，包含时间戳和内容
+         */
+        .message-item {
+            display: flex;
+            align-items: baseline;
+            margin-bottom: 2px;
+        }
+
+        /**
+         * 消息时间戳
+         */
+        .timestamp {
+            color: #6a737d;
+            font-size: 1em;
+            margin-right: 12px;
+            width: 70px; /* 固定宽度，方便对齐 */
+            flex-shrink: 0;
+        }
+
+        /**
+         * 消息正文内容
+         */
+        .message-content {
+            word-break: break-all;
+        }
+
+        /**
+         * 回复/引用消息的容器
+         */
+        .reply-container {}
+
+        /**
+         * 回复/引用消息的块级引用样式
+         */
+        blockquote {
+            border-left: 3px solid #d1d5da;
+            padding-left: 12px;
+            margin: 8px 0 8px 82px; /* 与消息内容对齐 */
+            color: #586069;
+            background-color: transparent;
+        }
+
+        /* --- 系统消息 --- */
+
+        /**
+         * 系统消息（如拍一拍、撤回等）的容器
+         */
+        .system-message-container {
+            padding: 10px 16px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+
+        /**
+         * 单条系统消息文本
+         */
+        .sys-message {
+            color: #586069;
+            text-align: left;
+            font-style: normal;
+            font-size: 1em;
+            margin: 4px 0;
+        }
+        .sys-message::before {
+            content: "[SYS]";
+            margin-right: 12px;
+            color: #959da5;
+        }
+
+
+        /* --- 响应式设计 --- */
+
+        /**
+         * 针对小屏幕设备的样式调整
+         */
+        @media (max-width: 600px) {
+            body {
+                margin: 0;
+                padding: 10px;
+                font-size: 13px;
+            }
+
+            .container {
+                border-radius: 0;
+                border: none;
+            }
+
+            .controls {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .controls button {
+                width: 100%;
+                margin: 0;
+            }
+
+            blockquote {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        {{file_header}}
+        <div class="controls">
+            <button onclick="toggleAll(true)">全部展开</button>
+            <button onclick="toggleAll(false)">全部收起</button>
+        </div>
+        <div id="chat-log">{{chat_content}}</div>
+    </div>
+    <script>
+        function toggleAll(expand) {
+            document.querySelectorAll('details.date-block').forEach(details => { details.open = expand })
+        }
+    </script>
+</body>
+
+</html>

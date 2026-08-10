@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Logs</title>
+    <style>
+        /* --- 基础与布局 --- */
+        body {
+            font-family: "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", "Courier", "PingFang SC", "Microsoft YaHei", monospace;
+            line-height: 1.5;
+            background-color: #f6f8fa;
+            color: #24292e;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 15px;
+            font-size: 14px;
+        }
+
+        .container {
+            border: 1px solid #d1d5da;
+            border-radius: 6px;
+        }
+
+        /* --- 页面头部 (file_header) --- */
+        .header {
+            border-bottom: 1px solid #d1d5da;
+            padding: 16px;
+            background-color: #f1f3f5;
+            border-radius: 6px 6px 0 0;
+        }
+
+        .header h1 {
+            font-size: 1.4em;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+
+        .header-group {
+            margin-bottom: 8px;
+        }
+        .header-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .header p {
+            margin: 2px 0;
+            color: #586069;
+        }
+
+        .header code {
+            background-color: rgba(27, 31, 35, 0.05);
+            padding: 2px 5px;
+            font-family: inherit;
+            word-break: break-all;
+            border-radius: 3px;
+        }
+
+        /* --- 控制按钮 --- */
+        .controls {
+            padding: 16px;
+            border-bottom: 1px solid #d1d5da;
+            background-color: #fff;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .controls button, .controls input, .controls select {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            background-color: #fafbfc;
+            border: 1px solid rgba(27, 31, 35, 0.15);
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        
+        .controls .search-input {
+            flex-grow: 1;
+        }
+
+        /* --- 聊天记录主体 (chat_content) --- */
+        #chat-log {
+            background-color: #fff;
+            border-radius: 0 0 6px 6px;
+        }
+
+        .date-block {
+            margin-top: 0;
+            border: none;
+            border-bottom: 1px solid #d1d5da;
+        }
+        .date-block:last-child {
+            border-bottom: none;
+        }
+
+        .date-block summary {
+            font-size: 1em;
+            font-weight: 600;
+            padding: 10px 16px;
+            background-color: #f1f3f5;
+            cursor: pointer;
+        }
+
+        .chat-day-content {
+            padding: 0;
+        }
+
+        .sender-message-group {
+            padding: 10px 16px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+        .chat-day-content > .sender-message-group:last-child {
+            border-bottom: none;
+        }
+
+        .is-self {
+            background-color: #f1f8ff;
+        }
+
+        .sender {
+            font-weight: bold;
+            margin-top: 0;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .message-item {
+            display: flex;
+            align-items: baseline;
+            margin-bottom: 2px;
+        }
+        
+        .highlight {
+            background-color: yellow;
+        }
+
+        .timestamp {
+            color: #6a737d;
+            font-size: 1em;
+            margin-right: 12px;
+            width: 70px;
+            flex-shrink: 0;
+        }
+
+        .message-content {
+            word-break: break-all;
+        }
+
+        blockquote {
+            border-left: 3px solid #d1d5da;
+            padding-left: 12px;
+            margin: 8px 0 8px 82px;
+            color: #586069;
+            background-color: transparent;
+        }
+
+        /* --- 系统消息 --- */
+        .system-message-container {
+            padding: 10px 16px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+
+        .sys-message {
+            color: #586069;
+            text-align: left;
+            font-style: normal;
+            font-size: 1em;
+            margin: 4px 0;
+        }
+        .sys-message::before {
+            content: "[SYS]";
+            margin-right: 12px;
+            color: #959da5;
+        }
+
+        /* --- 响应式设计 --- */
+        @media (max-width: 600px) {
+            body {
+                margin: 0;
+                padding: 10px;
+                font-size: 13px;
+            }
+
+            .container {
+                border-radius: 0;
+                border: none;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            blockquote {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        {{file_header}}
+        <div class="controls">
+            <button onclick="toggleAll(true)">全部展开</button>
+            <button onclick="toggleAll(false)">全部收起</button>
+            <input type="text" id="searchInput" class="search-input" placeholder="搜索消息内容..." oninput="searchMessages()">
+            <input type="date" id="datePicker" onchange="jumpToDate()">
+            <select id="exportFormat">
+                <option value="json">导出为JSON</option>
+                <option value="txt">导出为TXT</option>
+            </select>
+            <button onclick="exportData()">导出</button>
+        </div>
+        <div id="chat-log">{{chat_content}}</div>
+    </div>
+    <script>
+        let chatData = [];
+
+        function parseChatLog() {
+            const chatLogElement = document.getElementById('chat-log');
+            const dateBlocks = chatLogElement.querySelectorAll('.date-block');
+            
+            dateBlocks.forEach(dateBlock => {
+                const date = dateBlock.querySelector('summary').textContent.trim();
+                const messageGroups = dateBlock.querySelectorAll('.sender-message-group, .system-message-container');
+                
+                messageGroups.forEach(group => {
+                    const isSystem = group.classList.contains('system-message-container');
+                    if (isSystem) {
+                        const sysMessage = group.querySelector('.sys-message');
+                        if (sysMessage) {
+                             chatData.push({
+                                date: date,
+                                time: null,
+                                sender: 'SYSTEM',
+                                content: sysMessage.textContent.trim(),
+                                type: 'system'
+                            });
+                        }
+                    } else {
+                        const sender = group.querySelector('.sender').textContent.trim();
+                        const messages = group.querySelectorAll('.message-item');
+                        messages.forEach(item => {
+                            const time = item.querySelector('.timestamp').textContent.trim();
+                            const content = item.querySelector('.message-content').textContent.trim();
+                            const reply = item.nextElementSibling && item.nextElementSibling.querySelector('blockquote');
+                            
+                            chatData.push({
+                                date: date,
+                                time: time,
+                                sender: sender,
+                                content: content,
+                                reply: reply ? reply.textContent.trim() : null,
+                                type: 'user'
+                            });
+                        });
+                    }
+                });
+            });
+            console.log("Chat data parsed:", chatData);
+        }
+
+        function toggleAll(expand) {
+            document.querySelectorAll('details.date-block').forEach(details => { details.open = expand });
+        }
+        
+        function searchMessages() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            
+            // First, reset all highlights and visibility
+            document.querySelectorAll('.highlight').forEach(el => {
+                el.outerHTML = el.innerHTML;
+            });
+            document.querySelectorAll('.date-block, .sender-message-group, .system-message-container, .message-item').forEach(el => {
+                el.style.display = '';
+            });
+
+            if (!query) return;
+
+            document.querySelectorAll('.date-block').forEach(dateBlock => {
+                let dateHasMatch = false;
+                
+                dateBlock.querySelectorAll('.sender-message-group, .system-message-container').forEach(group => {
+                    let groupHasMatch = false;
+
+                    group.querySelectorAll('.message-item, .sys-message').forEach(item => {
+                        const contentElement = item.querySelector('.message-content') || item;
+                        const contentText = contentElement.textContent.toLowerCase();
+                        
+                        if (contentText.includes(query)) {
+                            groupHasMatch = true;
+                            dateHasMatch = true;
+                            item.style.display = 'flex'; // Ensure message-item is visible
+                            contentElement.innerHTML = contentElement.textContent.replace(new RegExp(escapeRegExp(query), 'gi'), match => `<span class="highlight">${match}</span>`);
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+
+                    if (groupHasMatch) {
+                        group.style.display = '';
+                    } else {
+                        group.style.display = 'none';
+                    }
+                });
+
+                if (dateHasMatch) {
+                    dateBlock.style.display = '';
+                    dateBlock.open = true;
+                } else {
+                    dateBlock.style.display = 'none';
+                }
+            });
+        }
+
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+
+        function jumpToDate() {
+            const picker = document.getElementById('datePicker');
+            const selectedDate = picker.value;
+            if (!selectedDate) return;
+
+            document.querySelectorAll('details.date-block').forEach(details => {
+                const summary = details.querySelector('summary');
+                if (summary && summary.textContent.trim() === selectedDate) {
+                    details.open = true;
+                    summary.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                    details.open = false;
+                }
+            });
+        }
+
+        function exportData() {
+            const format = document.getElementById('exportFormat').value;
+            let dataStr, mimeType, filename;
+            
+            const filteredData = chatData.filter(entry => {
+                 const query = document.getElementById('searchInput').value.toLowerCase();
+                 if (!query) return true;
+                 return entry.content.toLowerCase().includes(query);
+            });
+
+            if (format === 'json') {
+                dataStr = JSON.stringify(filteredData, null, 2);
+                mimeType = 'application/json';
+                filename = 'chat_log.json';
+            } else { // txt
+                dataStr = filteredData.map(msg => {
+                    if (msg.type === 'system') {
+                        return `[${msg.date}] [SYSTEM]: ${msg.content}`;
+                    }
+                    let line = `[${msg.date} ${msg.time}] ${msg.sender}: ${msg.content}`;
+                    if (msg.reply) {
+                        line += `\n    > ${msg.reply}`;
+                    }
+                    return line;
+                }).join('\n');
+                mimeType = 'text/plain';
+                filename = 'chat_log.txt';
+            }
+            
+            const blob = new Blob([dataStr], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Parse data on load
+        window.onload = parseChatLog;
+
+    </script>
+</body>
+
+</html>

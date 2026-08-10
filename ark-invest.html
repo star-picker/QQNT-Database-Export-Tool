@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARK-1 实时聊天记录分析器</title>
+    <link rel="icon" href="/lib/icon.ico" type="image/png">
+    <!-- [修复] 使用本地lib库替换CDN -->
+    <script src="/lib/tailwind.min.js"></script>
+    <script src="/lib/echarts.min.js"></script>
+    <script src="/lib/echarts-wordcloud.min.js"></script>
+    <script src="/lib/d3.min.js"></script>
+    <link rel="stylesheet" href="/lib/font-awesome.all.min.css">
+    <style>
+        /* 深色模式基础样式 */
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --text-color-muted: #a0aec0;
+            --panel-bg: #2a2a2a;
+            --border-color: #444;
+            --primary-color: #007bff;
+            --hover-bg: #3a3a3a;
+            --header-bg: #1f2937;
+            --self-msg-bg: #0c4a6e; /* 天蓝色系 (暗) Sky-900 */
+            --stat-blue-bg: #2a4365;
+            --stat-blue-text-header: #90cdf4;
+            --stat-blue-text-body: #63b3ed;
+            --stat-green-bg: #276749;
+            --stat-green-text-header: #68d391;
+            --stat-green-text-body: #48bb78;
+            --stat-purple-bg: #44337a;
+            --stat-purple-text-header: #b794f4;
+            --stat-purple-text-body: #9f7aea;
+        }
+
+        /* 浅色模式覆盖 */
+        html:not(.dark) {
+            --bg-color: #f3f4f6;
+            --text-color: #1f2937;
+            --text-color-muted: #6b7280;
+            --panel-bg: #ffffff;
+            --border-color: #e5e7eb;
+            --hover-bg: #f9fafb;
+            --header-bg: #f1f5f9;
+            --self-msg-bg: #e0f2fe; /* 天蓝色系 (亮) Sky-100 */
+            --stat-blue-bg: #eff6ff;
+            --stat-blue-text-header: #1e40af;
+            --stat-blue-text-body: #2563eb;
+            --stat-green-bg: #f0fdf4;
+            --stat-green-text-header: #166534;
+            --stat-green-text-body: #16a34a;
+            --stat-purple-bg: #faf5ff;
+            --stat-purple-text-header: #5b21b6;
+            --stat-purple-text-body: #7c3aed;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Inter', 'Helvetica Neue', 'Arial', 'sans-serif', "Microsoft YaHei";
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: clamp(280px, 25vw, 360px) 1fr;
+            height: 100vh;
+            max-height: 100vh;
+            overflow: hidden;
+        }
+
+        .panel { background-color: var(--panel-bg); border-color: var(--border-color); }
+        .resizable-panel { resize: horizontal; overflow: auto; }
+        
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--panel-bg); }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+        
+        /* 通用组件 */
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .status-connected { background-color: #28a745; }
+        .status-disconnected { background-color: #dc3545; }
+        .contact-item-container.active { background-color: var(--primary-color) !important; color: white; }
+        .chart-container { width: 100%; min-height: 400px; }
+        #chatTimeGroupGraph { min-height: 500px; }
+        .stat-card { background-color: var(--stat-blue-bg); }
+        .stat-card h2 { color: var(--stat-blue-text-header); }
+        .stat-card p { color: var(--stat-blue-text-body); }
+        .stat-card-green { background-color: var(--stat-green-bg); }
+        .stat-card-green h2 { color: var(--stat-green-text-header); }
+        .stat-card-green p { color: var(--stat-green-text-body); }
+        .stat-card-purple { background-color: var(--stat-purple-bg); }
+        .stat-card-purple h2 { color: var(--stat-purple-text-header); }
+        .stat-card-purple p { color: var(--stat-purple-text-body); }
+        .modal-content { background-color: var(--panel-bg); }
+        .modal-header { background-color: var(--hover-bg); border-bottom: 1px solid var(--border-color); }
+        .modal-body pre, .modal-body .formatted-data-list { background-color: var(--bg-color); }
+        .dark .node-label { fill: #e2e8f0; }
+        .node-label { fill: #333; }
+        .self-row { background-color: var(--self-msg-bg) !important; }
+        
+        /* 主题化UI元素 */
+        .themed-bg-sticky { background-color: var(--panel-bg); }
+        .themed-border { border-color: var(--border-color); }
+        .themed-input { background-color: var(--hover-bg); border: 1px solid var(--border-color); color: var(--text-color); }
+        .themed-button { background-color: var(--hover-bg); border: 1px solid var(--border-color); }
+        .themed-button:hover { background-color: var(--primary-color); border-color: var(--primary-color); color: white; }
+        thead { background-color: var(--header-bg); }
+        tbody { divide-color: var(--border-color); }
+        .contact-item-container { color: var(--text-color); }
+        .contact-item-container:hover { background-color: var(--hover-bg); }
+        .text-muted { color: var(--text-color-muted); }
+
+        /* Chart options dropdown styling */
+        .chart-options-dropdown {
+            position: absolute;
+            background-color: var(--panel-bg);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            z-index: 50;
+            min-width: 120px;
+            overflow: hidden;
+        }
+        .chart-options-dropdown button {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 1rem;
+            text-align: left;
+            font-size: 0.875rem;
+            color: var(--text-color);
+            transition: background-color 0.15s ease-in-out;
+        }
+        .chart-options-dropdown button:hover {
+            background-color: var(--hover-bg);
+        }
+        .modal-body .formatted-data-list p {
+            margin-bottom: 0.25rem;
+            padding: 0.5rem;
+            border-bottom: 1px dotted var(--border-color);
+            font-size: 0.9rem;
+        }
+        #chat-records-container {
+            overflow-y: scroll;
+        }
+    </style>
+</head>
+<body class="dark">
+    <div class="main-grid">
+        <!-- Left Panel: Contacts -->
+        <div id="left-panel" class="panel border-r flex flex-col resizable-panel min-w-[280px]">
+            <div class="p-4 themed-border border-b sticky top-0 themed-bg-sticky z-10">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-bold">ARK-1 | 联系人</h2>
+                    <div class="flex items-center space-x-2 text-sm">
+                        <span id="status-dot" class="status-dot status-disconnected"></span>
+                        <span id="connection-status">未连接</span>
+                    </div>
+                </div>
+                <div class="flex space-x-2 mb-2">
+                    <button id="show-friends-btn" class="bg-blue-600 flex-1 px-3 py-1 rounded-md text-sm">好友</button>
+                    <button id="show-groups-btn" class="bg-gray-600 flex-1 px-3 py-1 rounded-md text-sm">群聊</button>
+                </div>
+                 <div id="list-controls" class="flex space-x-2 mb-2">
+                    <button id="expand-all-btn" class="flex-1 themed-button text-xs px-2 py-1 rounded-md">全部展开</button>
+                    <button id="collapse-all-btn" class="flex-1 themed-button text-xs px-2 py-1 rounded-md">全部收起</button>
+                </div>
+                <input type="text" id="search-contact" placeholder="搜索联系人..." class="w-full themed-input rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div id="contact-list" class="flex-grow overflow-y-auto p-2">
+                <div class="text-center p-8 text-gray-400">正在连接服务器...</div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Analysis Content -->
+        <main id="main-content" class="overflow-y-auto p-6 relative">
+            <div id="welcome-screen" class="flex flex-col items-center justify-center h-full text-center">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-muted mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 012-2h2a2 2 0 012 2v6m-8-10V5a2 2 0 012-2h4a2 2 0 012 2v4m-8 0a2 2 0 002 2h4a2 2 0 002-2m-8 0H5a2 2 0 00-2 2v6a2 2 0 002 2h14a2 2 0 002-2v-6a2 2 0 00-2-2h-1m-4-10l-4 4m0 0l4 4m-4-4h12"/></svg>
+                <h1 class="text-3xl font-bold mb-2 text-muted">ARK-1 实时聊天分析器</h1>
+                <p class="text-lg text-muted">请从左侧选择一个会话以开始分析。</p>
+            </div>
+            
+            <!-- [修复] 移除背景色，使其能适应主题 -->
+            <div id="loading-indicator" class="hidden absolute inset-0 flex flex-col items-center justify-center h-full text-center">
+                <div class="w-full max-w-md">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+                    <p id="progress-title" class="mt-4 text-blue-400 text-lg">正在准备...</p>
+                    <div class="w-full bg-gray-600 rounded-full h-2.5 mt-4">
+                        <div id="progress-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-text" class="mt-2 text-blue-400 text-sm">&nbsp;</p>
+                </div>
+            </div>
+
+            <div id="analysis-container" class="hidden">
+                 <h1 id="analysis-title" class="text-3xl font-bold text-center mb-6"></h1>
+                <!-- Statistics Section -->
+                <div id="statisticsSection" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="stat-card p-5 rounded-lg shadow-sm">
+                        <h2 class="text-xl font-semibold mb-2">总消息数量</h2>
+                        <p id="totalMessages" class="text-3xl font-bold"></p>
+                    </div>
+                    <div class="stat-card-green p-5 rounded-lg shadow-sm">
+                        <h2 class="text-xl font-semibold mb-2">总聊天天数</h2>
+                        <p id="totalDays" class="text-3xl font-bold"></p>
+                    </div>
+                    <div class="stat-card-purple p-5 rounded-lg shadow-sm">
+                        <h2 class="text-xl font-semibold mb-2">平均每日消息</h2>
+                        <p id="avgDailyMessages" class="text-3xl font-bold"></p>
+                    </div>
+                </div>
+
+                 <!-- Charts Section -->
+                <div class="panel p-4 rounded-lg mb-8">
+                    <h2 class="text-2xl font-semibold mb-4">聊天数据可视化</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">逐月聊天消息统计</h3>
+                            <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="month-count" data-chart-options="bar,line"><i class="fas fa-cog"></i></button>
+                            <div id="echarts-month-count" class="chart-container"></div>
+                        </div>
+                        <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">聊天频率 (小时分布)</h3>
+                            <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="hours" data-chart-options="bar,line,pie"><i class="fas fa-cog"></i></button>
+                            <div id="echarts-hours" class="chart-container"></div>
+                        </div>
+                        <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">星期分布图</h3>
+                            <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="weekday" data-chart-options="pie,bar,line"><i class="fas fa-cog"></i></button>
+                            <div id="echarts-weekday" class="chart-container"></div>
+                        </div>
+                         <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">消息类型占比</h3>
+                            <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="types" data-chart-options="pie,bar"><i class="fas fa-cog"></i></button>
+                            <div id="echarts-types" class="chart-container"></div>
+                        </div>
+                        <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">双方消息占比</h3>
+                            <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="sender" data-chart-options="pie,bar"><i class="fas fa-cog"></i></button>
+                            <div id="echarts-sender" class="chart-container"></div>
+                        </div>
+                        <div class="panel p-4 rounded-lg shadow-inner relative">
+                            <h3 class="text-xl font-semibold mb-2">高频词云</h3>
+                             <button class="absolute top-4 right-4 text-muted hover:text-white chart-options-button" data-chart-id="wordcloud" data-chart-options=""><i class="fas fa-cog"></i></button>
+                            <div id="echarts-wordcloud" class="chart-container"></div>
+                        </div>
+                        <div class="panel p-4 rounded-lg shadow-inner col-span-full relative">
+                            <h3 class="text-xl font-semibold mb-2">日历热力图 (年度消息分布)</h3>
+                            <div class="absolute top-4 right-4 flex items-center space-x-2">
+                                <label for="calendarYearSelect" class="text-sm">年份:</label>
+                                <select id="calendarYearSelect" class="p-1 themed-input rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"></select>
+                                <button class="text-muted hover:text-white chart-options-button" data-chart-id="calendar" data-chart-options=""><i class="fas fa-cog"></i></button>
+                            </div>
+                            <div id="echarts-calendar" class="chart-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Member Activity Section (for large groups) -->
+                <div id="memberActivitySection" class="panel p-4 rounded-lg mb-8 hidden">
+                    <h2 class="text-2xl font-semibold mb-4">成员活跃度排行</h2>
+                    <p class="text-muted mb-4 text-sm">对超过50人的大型群聊启用。统计分析群成员的消息数量和最后发言时间。</p>
+                    <div class="overflow-y-auto max-h-96 themed-border border rounded-lg">
+                        <table class="min-w-full">
+                            <thead class="sticky top-0">
+                                <tr>
+                                    <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider">排名</th>
+                                    <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider">成员</th>
+                                    <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider">消息数量</th>
+                                    <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider">最后发言</th>
+                                </tr>
+                            </thead>
+                            <tbody id="memberActivityTableBody" class="divide-y"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Chat Records Section -->
+                <div class="panel p-4 rounded-lg mb-8">
+                     <h2 class="text-2xl font-semibold mb-4">聊天记录详情</h2>
+                    <div class="flex flex-col md:flex-row gap-4 mb-4">
+                        <input type="text" id="searchInput" placeholder="搜索聊天记录..." class="flex-grow p-3 themed-input rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                        <input type="date" id="startDateInput" class="p-3 themed-input rounded-lg"/>
+                        <input type="date" id="endDateInput" class="p-3 themed-input rounded-lg"/>
+                        <button id="searchButton" class="px-6 py-2 bg-indigo-600 text-white rounded-full shadow-md hover:bg-indigo-700">搜索</button>
+                        <button id="exportFilteredButton" class="px-6 py-2 bg-teal-600 text-white rounded-full shadow-md hover:bg-teal-700">导出当前记录</button>
+                    </div>
+                    <div id="chat-records-container" class="max-h-96 themed-border border rounded-lg relative">
+                        <div id="chat-records-sizer" style="position: relative; overflow: hidden; width: 100%; height: 0;">
+                            <table class="min-w-full" style="position: absolute; top: 0; left: 0; width: 100%;">
+                                <thead class="sticky top-0">
+                                    <tr>
+                                        <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider w-[180px]">时间</th>
+                                        <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider w-[150px]">发送者</th>
+                                        <th class="py-3 px-4 text-left text-sm font-medium uppercase tracking-wider">内容</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="chatRecordsTableBody" class="divide-y"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Time Group Analysis Section -->
+                <div class="panel p-4 rounded-lg mb-8">
+                    <h2 class="text-2xl font-semibold mb-4">聊天记录时间组分析</h2>
+                    <p class="text-muted mb-4 text-sm">此图表将聊天记录按连续时间段分组，每个圆点代表一个聊天时间组。圆点越大表示该时间组内的消息越多，越靠近中心表示该时间组越活跃。双击圆点查看该时间段内的详细聊天记录。</p>
+                    <div id="chatTimeGroupGraph" class="p-4 themed-bg-sticky rounded-lg themed-border border"></div>
+                </div>
+                
+                <!-- Export Section -->
+                <div id="exportAllSection" class="panel p-4 rounded-lg">
+                     <h2 class="text-2xl font-semibold mb-4">数据导出</h2>
+                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <button data-export="daily" class="themed-button p-2 rounded-full">导出每日消息统计 (CSV)</button>
+                        <button data-export="monthly" class="themed-button p-2 rounded-full">导出逐月聊天统计 (CSV)</button>
+                        <button data-export="hourly" class="themed-button p-2 rounded-full">导出聊天频率 (CSV)</button>
+                        <button data-export="weekday" class="themed-button p-2 rounded-full">导出星期分布 (CSV)</button>
+                        <button data-export="types" class="themed-button p-2 rounded-full">导出消息类型占比 (CSV)</button>
+                        <button data-export="sender" class="themed-button p-2 rounded-full">导出双方消息占比 (CSV)</button>
+                        <button data-export="wordcloud" class="themed-button p-2 rounded-full">导出高频词云数据 (CSV)</button>
+                        <button data-export="timegroup" class="themed-button p-2 rounded-full">导出聊天时间组数据 (CSV)</button>
+                        <button id="exportAllAnalysisDataButton" class="px-6 py-2 bg-pink-600 text-white rounded-full shadow-md hover:bg-pink-700 col-span-full">导出所有分析数据 (JSON)</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Theme Toggle Button -->
+    <button id="themeToggle" class="fixed bottom-4 right-4 p-3 rounded-full bg-gray-200 text-gray-800 dark:bg-gray-800 dark:text-white shadow-lg focus:outline-none z-50">
+        <i class="fas fa-sun"></i>
+    </button>
+    
+    <!-- Chart Options Dropdown (hidden by default) -->
+    <div id="chartOptionsDropdown" class="chart-options-dropdown hidden"></div>
+
+    <!-- Raw Data Modal -->
+    <div id="rawDataModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center hidden z-[1000]">
+        <div class="modal-content rounded-lg shadow-xl w-full max-w-4xl h-[80vh] flex flex-col">
+            <div class="modal-header p-4 flex justify-between items-center">
+                <h3 class="text-xl font-bold" id="rawDataModalTitle"></h3>
+                <button class="text-2xl" id="rawDataModalClose">&times;</button>
+            </div>
+            <div class="modal-body p-6 overflow-y-auto" id="rawDataModalBody"></div>
+        </div>
+    </div>
+    
+    <script>
+        // --- 核心状态变量 ---
+        let ws;
+        let myUid = '';
+        let friendData = {};
+        let groupData = [];
+        let allUsersMap = new Map();
+        let currentView = 'friends';
+        let activeChat = { type: null, id: null, readableId: null, name: null, memberCount: 0 };
+        
+        let chatData = []; // 存储当前分析的聊天记录
+        let filteredChatData = []; // 存储过滤后的聊天记录
+        
+        // --- DOM 元素 ---
+        const statusDot = document.getElementById('status-dot');
+        const connectionStatus = document.getElementById('connection-status');
+        const contactList = document.getElementById('contact-list');
+        const searchInputContact = document.getElementById('search-contact');
+        const showFriendsBtn = document.getElementById('show-friends-btn');
+        const showGroupsBtn = document.getElementById('show-groups-btn');
+        const expandAllBtn = document.getElementById('expand-all-btn');
+        const collapseAllBtn = document.getElementById('collapse-all-btn');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const progressTitle = document.getElementById('progress-title');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const analysisContainer = document.getElementById('analysis-container');
+        const analysisTitle = document.getElementById('analysis-title');
+        
+        const totalMessagesEl = document.getElementById('totalMessages');
+        const totalDaysEl = document.getElementById('totalDays');
+        const avgDailyMessagesEl = document.getElementById('avgDailyMessages');
+        
+        const calendarYearSelect = document.getElementById('calendarYearSelect');
+        const searchInput = document.getElementById('searchInput');
+        const startDateInput = document.getElementById('startDateInput');
+        const endDateInput = document.getElementById('endDateInput');
+        const searchButton = document.getElementById('searchButton');
+        const exportFilteredButton = document.getElementById('exportFilteredButton');
+        const chatRecordsTableBody = document.getElementById('chatRecordsTableBody');
+
+        const chatTimeGroupGraph = document.getElementById('chatTimeGroupGraph');
+        const memberActivitySection = document.getElementById('memberActivitySection');
+        const memberActivityTableBody = document.getElementById('memberActivityTableBody');
+        
+        const themeToggle = document.getElementById('themeToggle');
+        const body = document.documentElement;
+
+        const chartOptionsDropdown = document.getElementById('chartOptionsDropdown');
+        const rawDataModal = document.getElementById('rawDataModal');
+        const rawDataModalTitle = document.getElementById('rawDataModalTitle');
+        const rawDataModalBody = document.getElementById('rawDataModalBody');
+        const rawDataModalClose = document.getElementById('rawDataModalClose');
+
+        // --- ECharts 实例 ---
+        let monthChart, hoursChart, weekdayChart, typesChart, senderChart, wordcloudChart, calendarChart;
+        let messagePromise = {};
+        
+        // --- Chart State ---
+        const currentChartTypes = {
+            'month-count': 'bar',
+            'hours': 'bar',
+            'weekday': 'pie',
+            'types': 'pie',
+            'sender': 'pie',
+        };
+
+        // --- WebSocket & 数据处理 ---
+        function connect() {
+            ws = new WebSocket('ws://localhost:8765');
+            ws.onopen = () => {
+                updateConnectionStatus(true);
+                ws.send(JSON.stringify({ command: 'get_initial_data' }));
+            };
+            ws.onmessage = (event) => handleServerMessage(JSON.parse(event.data));
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                setTimeout(connect, 3000);
+            };
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                ws.close();
+            };
+        }
+
+        function updateConnectionStatus(isConnected) {
+            statusDot.className = `status-dot ${isConnected ? 'status-connected' : 'status-disconnected'}`;
+            connectionStatus.textContent = isConnected ? '已连接' : '未连接';
+        }
+
+        function handleServerMessage(data) {
+            switch (data.type) {
+                case 'initial_data':
+                    myUid = data.my_uid;
+                    friendData = data.friends;
+                    groupData = data.groups;
+                    buildUserMap();
+                    renderCurrentView();
+                    // [新增] 检查URL参数并自动开始分析
+                    const urlParams = getUrlParams();
+                    if (urlParams.type && urlParams.id) {
+                        setTimeout(() => autoStartAnalysis(urlParams.type, urlParams.id), 100);
+                    }
+                    break;
+                case 'chat_history':
+                    if (messagePromise.resolve) {
+                        messagePromise.resolve(data.history);
+                    }
+                    break;
+                case 'error':
+                    console.error("Server Error:", data.message);
+                    alert(`服务器错误: ${data.message}`);
+                    loadingIndicator.classList.add('hidden');
+                    welcomeScreen.classList.remove('hidden');
+                    if(messagePromise.reject) messagePromise.reject(new Error(data.message));
+                    break;
+            }
+        }
+
+        function buildUserMap() {
+            allUsersMap.clear();
+            Object.values(friendData).forEach(group => {
+                group.users.forEach(user => allUsersMap.set(user.uid, user));
+            });
+        }
+        
+        function transformHistoryData(history) {
+            return history.map(msg => {
+                const senderInfo = allUsersMap.get(msg.s_uid) || {};
+                const decodedText = new DOMParser().parseFromString(msg.text, "text/html").documentElement.textContent;
+
+                return {
+                    StrTime: new Date(msg.ts * 1000).toLocaleString('sv-SE'),
+                    Sender: msg.s_uid,
+                    NickName: msg.sender_name,
+                    Remark: senderInfo.remark || '',
+                    StrContent: decodedText,
+                    Type: inferMessageType(decodedText, msg.is_system_tip),
+                    isSender: msg.s_uid === myUid ? 1 : 0
+                };
+            });
+        }
+
+        function inferMessageType(content, isSystemTip) {
+            if (isSystemTip) return '10000'; // System Message
+            if (/\[图片\]|\[表情\]|\[动画表情\]|\[闪照\]/.test(content)) return '3'; // Image/Emoji
+            if (/\[语音\]/.test(content)) return '34';
+            if (/\[视频\]/.test(content)) return '43';
+            if (/\[分享\]|\[链接\]|\[位置:/.test(content)) return '49'; // Link/Share
+            return '1'; // Default to Text
+        }
+
+        function updateProgress(percentage, text, title = "正在拉取并解析聊天记录...") {
+            progressTitle.textContent = title;
+            progressBar.style.width = `${percentage}%`;
+            progressText.textContent = text;
+        }
+
+        function fetchChatHistoryChunk(type, id, before_ts = null) {
+            return new Promise((resolve, reject) => {
+                messagePromise = { resolve, reject };
+                ws.send(JSON.stringify({ command: 'get_chat_history', type, id, before_ts }));
+            });
+        }
+        
+        async function fetchAllHistory(type, id) {
+            let allHistory = [];
+            let lastTimestamp = null;
+            let keepFetching = true;
+            let fetchedCount = 0;
+
+            while(keepFetching) {
+                const chunk = await fetchChatHistoryChunk(type, id, lastTimestamp);
+                if (chunk && chunk.length > 0) {
+                    allHistory.unshift(...chunk);
+                    lastTimestamp = chunk[0].ts;
+                    fetchedCount += chunk.length;
+                    updateProgress(10 + Math.min(40, (fetchedCount / 5000) * 40), `已拉取 ${fetchedCount} 条记录...`);
+                } else {
+                    keepFetching = false;
+                }
+            }
+            return allHistory;
+        }
+        
+        async function fetchAndAnalyzeContact(type, id, name, readableId, memberCount) {
+            resetUI();
+            activeChat = { type, id, name, readableId, memberCount };
+            welcomeScreen.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            updateProgress(5, '正在请求聊天记录...', '正在连接服务器...');
+            analysisTitle.textContent = `与 ${name} 的聊天分析`;
+            
+            try {
+                const fullHistory = await fetchAllHistory(type, id);
+                updateProgress(50, `共获取 ${fullHistory.length} 条记录，正在处理...`, '正在处理数据...');
+                const transformedData = transformHistoryData(fullHistory);
+                await startAnalysis(transformedData);
+            } catch (error) {
+                console.error("Failed to fetch full history:", error);
+                loadingIndicator.classList.add('hidden');
+                welcomeScreen.classList.remove('hidden');
+                welcomeScreen.querySelector('p').textContent = '获取聊天记录失败。';
+            }
+        }
+        
+        async function startAnalysis(data) {
+            chatData = data;
+            filteredChatData = [...chatData];
+
+            if (chatData.length === 0) {
+                loadingIndicator.classList.add('hidden');
+                welcomeScreen.classList.remove('hidden');
+                welcomeScreen.querySelector('p').textContent = `未能获取到与 ${analysisTitle.textContent.replace('与 ', '').replace(' 的聊天分析', '')} 的聊天记录。`;
+                return;
+            }
+
+            updateProgress(60, '正在统计基本信息...', '正在分析...');
+            await new Promise(resolve => setTimeout(resolve, 50));
+            analyzeChatData();
+
+            if (activeChat.type === 'group' && activeChat.memberCount > 50) {
+                updateProgress(70, `正在分析 ${activeChat.memberCount} 位成员活跃度...`, '正在进行大数据分析...');
+                await new Promise(resolve => setTimeout(resolve, 50));
+                analyzeMemberActivity();
+            }
+
+            updateProgress(80, '正在渲染聊天记录表格...', '正在生成报告...');
+            await new Promise(resolve => setTimeout(resolve, 50));
+            setupVirtualScroll(filteredChatData);
+            
+            updateProgress(95, '正在分析时间分组...', '正在生成报告...');
+            await new Promise(resolve => setTimeout(resolve, 50));
+            analyzeChatTimeGroups();
+
+            updateProgress(100, '分析完成！', '分析完成！');
+
+            setTimeout(() => {
+                loadingIndicator.classList.add('hidden');
+                analysisContainer.classList.remove('hidden');
+                document.title = analysisTitle.textContent;
+
+                requestAnimationFrame(() => {
+                    initAllCharts();
+                    renderCharts();
+                });
+
+            }, 500);
+        }
+        
+        // [新增] 用于解析URL参数并自动开始分析的函数
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                type: params.get('type'),
+                id: params.get('id')
+            };
+        }
+
+        function autoStartAnalysis(type, id) {
+            let targetName = '未知会话';
+            let readableId = id;
+            let memberCount = 0;
+            let found = false;
+
+            if (type === 'friend') {
+                for (const group of Object.values(friendData)) {
+                    const user = group.users.find(u => u.uid === id);
+                    if (user) {
+                        targetName = user.remark ? `${user.remark} (${user.nickname || user.qq})` : (user.nickname || user.qq);
+                        readableId = user.qq;
+                        found = true;
+                        break;
+                    }
+                }
+            } else if (type === 'group') {
+                const group = groupData.find(g => g.id === id);
+                if (group) {
+                    targetName = `${group.name} (${group.member_count})`;
+                    readableId = group.uin;
+                    memberCount = group.member_count;
+                    found = true;
+                }
+            }
+
+            if (found) {
+                const contactItem = document.querySelector(`.contact-item-container[data-id="${id}"]`);
+                if(contactItem) {
+                     document.querySelectorAll('.contact-item-container.active').forEach(el => el.classList.remove('active'));
+                     contactItem.classList.add('active');
+                }
+                fetchAndAnalyzeContact(type, id, targetName.split(' (')[0], readableId, memberCount);
+            } else {
+                console.warn(`Could not find contact for type=${type} and id=${id} from initial data.`);
+                welcomeScreen.querySelector('p').textContent = `无法自动加载指定的会话 (type=${type}, id=${id})。请从左侧手动选择。`;
+            }
+        }
+
+
+        // --- 左侧边栏 UI 渲染 ---
+        function renderCurrentView() {
+            const filter = searchInputContact.value.toLowerCase();
+            const listControls = document.getElementById('list-controls');
+            listControls.style.display = currentView === 'friends' ? 'flex' : 'none';
+
+            if (currentView === 'friends') {
+                renderFriendList(filter);
+            } else {
+                renderGroupList(filter);
+            }
+        }
+        
+        function renderFriendList(filter) {
+            contactList.innerHTML = '';
+            Object.values(friendData).forEach(group => {
+                const filteredUsers = group.users.filter(u => 
+                    (u.nickname && u.nickname.toLowerCase().includes(filter)) ||
+                    (u.remark && u.remark.toLowerCase().includes(filter)) ||
+                    (u.qq && String(u.qq).includes(filter))
+                );
+                if (filter && filteredUsers.length === 0) return;
+                
+                const details = document.createElement('details');
+                details.open = true;
+                details.className = 'mb-2 friend-group-details';
+                const summary = document.createElement('summary');
+                summary.className = 'font-semibold text-lg cursor-pointer p-2 rounded-md';
+                summary.textContent = `${group.name} (${filteredUsers.length})`;
+                details.appendChild(summary);
+                
+                const userList = document.createElement('div');
+                userList.className = 'ml-4 border-l-2 themed-border pl-4 space-y-1';
+                filteredUsers.forEach(user => {
+                    const displayName = user.remark ? `${user.remark} (${user.nickname || user.qq})` : (user.nickname || user.qq);
+                    userList.appendChild(createContactItem('friend', user.uid, displayName, `QQ: ${user.qq}`));
+                });
+                details.appendChild(userList);
+                contactList.appendChild(details);
+            });
+        }
+        
+        function renderGroupList(filter) {
+            contactList.innerHTML = '';
+            const filteredGroups = groupData.filter(g => g.name.toLowerCase().includes(filter) || String(g.uin).includes(filter));
+            filteredGroups.forEach(group => {
+                contactList.appendChild(createContactItem('group', group.id, `${group.name} (${group.member_count})`, `ID: ${group.uin}`));
+            });
+        }
+
+        function createContactItem(type, id, title, subtitle) {
+            const item = document.createElement('div');
+            item.className = 'contact-item-container p-2 my-1 rounded-md transition-colors duration-200 cursor-pointer';
+            item.dataset.id = id; // [新增] 为自动选择添加id
+            item.innerHTML = `
+                <div>
+                    <div class="font-medium text-sm">${title}</div>
+                    <div class="text-xs text-muted">${subtitle}</div>
+                </div>`;
+            item.onclick = () => {
+                document.querySelectorAll('.contact-item-container.active').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+                
+                const readableId = subtitle.replace(/QQ: |ID: /g, '');
+                const name = title.split(' (')[0];
+                let memberCount = 0;
+                if (type === 'group') {
+                    const groupInfo = groupData.find(g => g.id === id);
+                    memberCount = groupInfo ? groupInfo.member_count : 0;
+                }
+                fetchAndAnalyzeContact(type, id, name, readableId, memberCount);
+            };
+            return item;
+        }
+        
+        // --- 核心分析与UI更新 ---
+        function resetUI() {
+            analysisContainer.classList.add('hidden');
+            welcomeScreen.classList.remove('hidden'); 
+            loadingIndicator.classList.add('hidden'); 
+            memberActivitySection.classList.add('hidden');
+            memberActivityTableBody.innerHTML = '';
+            totalMessagesEl.textContent = '';
+            totalDaysEl.textContent = '';
+            avgDailyMessagesEl.textContent = '';
+            chatRecordsTableBody.innerHTML = '';
+            chatTimeGroupGraph.innerHTML = '';
+            searchInput.value = '';
+            startDateInput.value = '';
+            endDateInput.value = '';
+            calendarYearSelect.innerHTML = '';
+            [monthChart, hoursChart, weekdayChart, typesChart, senderChart, wordcloudChart, calendarChart].forEach(c => c?.dispose());
+            rawDataModal.classList.add('hidden');
+            document.title = 'ARK-1 实时聊天记录分析器';
+        }
+        
+        function analyzeMemberActivity() {
+            memberActivitySection.classList.remove('hidden');
+            const memberStats = {};
+
+            chatData.forEach(r => {
+                if (!r.Sender) return;
+                if (!memberStats[r.Sender]) {
+                    memberStats[r.Sender] = {
+                        name: r.Remark || r.NickName || r.Sender,
+                        count: 0,
+                        lastSeen: new Date(r.StrTime).getTime()
+                    };
+                }
+                memberStats[r.Sender].count++;
+                const currentTime = new Date(r.StrTime).getTime();
+                if (currentTime > memberStats[r.Sender].lastSeen) {
+                    memberStats[r.Sender].lastSeen = currentTime;
+                }
+            });
+
+            const sortedMembers = Object.entries(memberStats)
+                .map(([uid, stats]) => ({ uid, ...stats }))
+                .sort((a, b) => b.count - a.count);
+
+            memberActivityTableBody.innerHTML = sortedMembers.map((member, index) => `
+                <tr>
+                    <td class="py-2 px-4 whitespace-nowrap text-sm">${index + 1}</td>
+                    <td class="py-2 px-4 whitespace-nowrap text-sm">${member.name}</td>
+                    <td class="py-2 px-4 whitespace-nowrap text-sm">${member.count}</td>
+                    <td class="py-2 px-4 whitespace-nowrap text-sm">${new Date(member.lastSeen).toLocaleString('sv-SE')}</td>
+                </tr>
+            `).join('');
+        }
+
+        function analyzeChatData() {
+            totalMessagesEl.textContent = chatData.length;
+            const dailyMessageCounts = {};
+            chatData.forEach(r => {
+                const dateStr = r.StrTime.split(' ')[0];
+                dailyMessageCounts[dateStr] = (dailyMessageCounts[dateStr] || 0) + 1;
+            });
+            const totalDays = Object.keys(dailyMessageCounts).length;
+            totalDaysEl.textContent = totalDays;
+            avgDailyMessagesEl.textContent = totalDays > 0 ? (chatData.length / totalDays).toFixed(2) : 0;
+            populateCalendarYearSelect();
+        }
+
+        function performSearch() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const startDateStr = startDateInput.value;
+            const endDateStr = endDateInput.value;
+            let tempFilteredData = [...chatData];
+            if (searchTerm) {
+                tempFilteredData = tempFilteredData.filter(r => (r.StrContent && r.StrContent.toLowerCase().includes(searchTerm)) || (r.NickName && r.NickName.toLowerCase().includes(searchTerm)) || (r.Remark && r.Remark.toLowerCase().includes(searchTerm)));
+            }
+            if (startDateStr || endDateStr) {
+                const start = startDateStr ? new Date(startDateStr).getTime() : -Infinity;
+                const end = endDateStr ? new Date(endDateStr).setHours(23, 59, 59, 999) : Infinity;
+                tempFilteredData = tempFilteredData.filter(r => {
+                    const recordTime = new Date(r.StrTime).getTime();
+                    return recordTime >= start && recordTime <= end;
+                });
+            }
+            filteredChatData = tempFilteredData;
+            setupVirtualScroll(filteredChatData);
+        }
+
+        // --- Virtual Scroll for Chat Records ---
+        const RECORD_ROW_HEIGHT = 45; // Estimated height of a single chat row in px
+        const OVERSCAN_COUNT = 10; // Number of items to render before and after the visible area
+        let currentVirtualScrollRecords = [];
+        let chatRecordsContainer;
+        let chatRecordsSizer;
+        let chatRecordsTable;
+        let lastRenderedStartIndex = -1;
+        let lastRenderedEndIndex = -1;
+        let scrollTimeout;
+
+        function setupVirtualScroll(records) {
+            currentVirtualScrollRecords = records;
+            if(!chatRecordsSizer) return; // Exit if elements are not ready
+            
+            chatRecordsSizer.style.height = `${records.length * RECORD_ROW_HEIGHT}px`;
+            
+            chatRecordsContainer.scrollTop = 0;
+            lastRenderedStartIndex = -1;
+            lastRenderedEndIndex = -1;
+            handleVirtualScroll();
+        }
+
+        function renderVisibleRows() {
+            const scrollTop = chatRecordsContainer.scrollTop;
+            const containerHeight = chatRecordsContainer.clientHeight;
+
+            const startIndex = Math.max(0, Math.floor(scrollTop / RECORD_ROW_HEIGHT) - OVERSCAN_COUNT);
+            const endIndex = Math.min(currentVirtualScrollRecords.length, Math.ceil((scrollTop + containerHeight) / RECORD_ROW_HEIGHT) + OVERSCAN_COUNT);
+
+            if (startIndex === lastRenderedStartIndex && endIndex === lastRenderedEndIndex) {
+                return;
+            }
+            
+            lastRenderedStartIndex = startIndex;
+            lastRenderedEndIndex = endIndex;
+            
+            const visibleRecords = currentVirtualScrollRecords.slice(startIndex, endIndex);
+
+            const rowsHtml = visibleRecords.map(r => {
+                const rowClass = r.isSender ? 'self-row' : '';
+                const senderName = r.Remark || r.NickName || r.Sender;
+                const escapedContent = (r.StrContent || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                return `
+                    <tr class="${rowClass}">
+                        <td class="py-2 px-4 whitespace-nowrap text-sm">${r.StrTime}</td>
+                        <td class="py-2 px-4 whitespace-nowrap text-sm">${senderName}</td>
+                        <td class="py-2 px-4 text-sm break-all">${escapedContent}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            chatRecordsTableBody.innerHTML = rowsHtml;
+            chatRecordsTable.style.transform = `translateY(${startIndex * RECORD_ROW_HEIGHT}px)`;
+        }
+
+        function handleVirtualScroll() {
+            if (scrollTimeout) {
+                cancelAnimationFrame(scrollTimeout);
+            }
+            scrollTimeout = requestAnimationFrame(renderVisibleRows);
+        }
+
+        function exportData(data, filename, headers = null) {
+            if (data.length === 0) { alert('没有数据可以导出。'); return; }
+            const finalHeaders = headers || Object.keys(data[0]);
+            const csvRows = [finalHeaders.join(',')];
+            data.forEach(row => {
+                const values = finalHeaders.map(h => {
+                    const val = row[h];
+                    if (typeof val === 'string' && (val.includes(',') || val.includes('"') || val.includes('\n'))) {
+                        return `"${val.replace(/"/g, '""')}"`;
+                    }
+                    return val;
+                });
+                csvRows.push(values.join(','));
+            });
+            const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+        }
+        
+        // --- 数据获取与图表渲染函数 ---
+        function getDailyChatData() {
+            const dailyMessageCounts = {};
+            chatData.forEach(r => {
+                const dateStr = r.StrTime.split(' ')[0];
+                dailyMessageCounts[dateStr] = (dailyMessageCounts[dateStr] || 0) + 1;
+            });
+            return dailyMessageCounts;
+        }
+
+        function getMonthlyChatData() {
+            const monthlyCounts = {};
+            chatData.forEach(record => {
+                const date = new Date(record.StrTime);
+                if (!isNaN(date)) {
+                    const yearMonth = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                    monthlyCounts[yearMonth] = (monthlyCounts[yearMonth] || 0) + 1;
+                }
+            });
+            const sortedMonths = Object.keys(monthlyCounts).sort();
+            const data = sortedMonths.map(month => monthlyCounts[month]);
+            return { months: sortedMonths, data: data };
+        }
+        
+        function getHourlyChatData() {
+            const hourlyCounts = Array(24).fill(0);
+            chatData.forEach(record => {
+                const date = new Date(record.StrTime);
+                if (!isNaN(date)) hourlyCounts[date.getHours()]++;
+            });
+            const hours = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+            return { hours, data: hourlyCounts };
+        }
+
+        function getWeekdayChatData() {
+            const weekdayCounts = Array(7).fill(0);
+            const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            chatData.forEach(record => {
+                const date = new Date(record.StrTime);
+                if (!isNaN(date)) weekdayCounts[date.getDay()]++;
+            });
+            return { weekdays, data: weekdayCounts };
+        }
+
+        function getMessageTypeData() {
+            const typeCounts = {};
+            chatData.forEach(record => {
+                const typeName = { '1': '文本', '3': '图片/表情', '34': '语音', '43': '视频', '49': '分享/链接', '10000': '系统消息' }[record.Type] || '其他';
+                typeCounts[typeName] = (typeCounts[typeName] || 0) + 1;
+            });
+            return Object.entries(typeCounts).map(([name, value]) => ({ name, value }));
+        }
+
+        function getSenderRatioData() {
+            const senderCounts = {};
+            chatData.forEach(record => {
+                const senderName = record.Remark || record.NickName || record.Sender;
+                senderCounts[senderName] = (senderCounts[senderName] || 0) + 1;
+            });
+            return Object.entries(senderCounts).map(([name, value]) => ({ name, value }));
+        }
+        
+        function getWordCloudData() {
+             const allContentText = chatData
+                .filter(record => record.StrContent && record.Type === '1') 
+                .map(record => record.StrContent)
+                .join(' ');
+            const words = allContentText.toLowerCase().match(/[\u4e00-\u9fa5]+|[a-zA-Z0-9]+/g) || [];
+            const stopWords = new Set([
+                '的', '是', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们', '这', '那', '个', '在', '有', '和', '也', '都', '不', '很', '啊', '哦', '嗯', '吗', '呢', '吧', '就', '可以', '一个', '什么', '怎么', '好', '谢谢', '哈哈', '呵呵', '啦', '呀', '啊', '哦', '嗯', '嗯嗯', '哈', '行', '请', '给', '说', '看', '想', '要', '会', '能', '去', '来', '到', '从', '把', '被', '对', '与', '及', '而', '或', '但', '所以', '因为', '如果', '虽然', '然后', '不过', '但是', '因此', '然后', '而且', '还有', '就是', '不是', '没有', '不能', '不要', '不用',
+                'a', 'an', 'the', 'is', 'to', 'in', 'on', 'of', 'and', 'or', 'but', 'for', 'with', 'by', 'at', 'from', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'so', 'if', 'that', 'it', 'what', 'who', 'when', 'where', 'why', 'how', 'some', 'any', 'all', 'one', 'no',
+                '[coolguy]', '[letmesee]',
+                'cdnurl', 'filekey', 'stodownload', 'url', 'http', 'https', 'com', 'cn', 'org', 'www', 'qq',
+            ]); 
+            const wordCounts = {};
+            words.forEach(word => {
+                if (word.length > 1 && !stopWords.has(word) && !/^\d+$/.test(word)) { // Filter out pure numbers
+                    wordCounts[word] = (wordCounts[word] || 0) + 1;
+                }
+            });
+            return Object.keys(wordCounts).map(key => ({
+                name: key,
+                value: wordCounts[key]
+            })).sort((a, b) => b.value - a.value).slice(0, 100);
+        }
+
+        function populateCalendarYearSelect() {
+            const years = new Set();
+            let latestYear = '';
+
+            chatData.forEach(record => {
+                const date = new Date(record.StrTime);
+                if (!isNaN(date)) {
+                    const year = date.getFullYear().toString();
+                    years.add(year);
+                    if (!latestYear || year > latestYear) {
+                        latestYear = year;
+                    }
+                }
+            });
+
+            const sortedYears = Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
+
+            calendarYearSelect.innerHTML = '';
+            if (sortedYears.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '无年份';
+                calendarYearSelect.appendChild(option);
+                calendarYearSelect.disabled = true;
+            } else {
+                calendarYearSelect.disabled = false;
+                sortedYears.forEach(year => {
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = year;
+                    calendarYearSelect.appendChild(option);
+                });
+                calendarYearSelect.value = latestYear;
+            }
+        }
+        
+        function getCalendarData(year) {
+            const dailyCounts = {};
+            const yearFilteredData = chatData.filter(record => {
+                const date = new Date(record.StrTime);
+                return !isNaN(date) && date.getFullYear().toString() === year;
+            });
+
+            yearFilteredData.forEach(record => {
+                const date = new Date(record.StrTime);
+                const dateString = date.toISOString().slice(0, 10); // YYYY-MM-DD
+                dailyCounts[dateString] = (dailyCounts[dateString] || 0) + 1;
+            });
+
+            const data = [];
+            const startDate = new Date(year, 0, 1);
+            const endDate = new Date(year, 11, 31);
+            let currentDate = new Date(startDate);
+
+            while (currentDate <= endDate) {
+                const dateString = currentDate.toISOString().slice(0, 10);
+                data.push([dateString, dailyCounts[dateString] || 0]);
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+            return data;
+        }
+
+        function getChartStyleOptions() {
+            const isDark = body.classList.contains('dark');
+            return {
+                textColor: isDark ? '#e0e0e0' : '#333',
+                axisLineColor: isDark ? '#444' : '#ccc',
+                splitLineColor: isDark ? '#3a3a3a' : '#eee',
+            };
+        }
+        
+        function initAllCharts() {
+            [monthChart, hoursChart, weekdayChart, typesChart, senderChart, wordcloudChart, calendarChart].forEach(c => c?.dispose());
+            monthChart = echarts.init(document.getElementById('echarts-month-count'));
+            hoursChart = echarts.init(document.getElementById('echarts-hours'));
+            weekdayChart = echarts.init(document.getElementById('echarts-weekday'));
+            typesChart = echarts.init(document.getElementById('echarts-types'));
+            senderChart = echarts.init(document.getElementById('echarts-sender'));
+            wordcloudChart = echarts.init(document.getElementById('echarts-wordcloud'));
+            calendarChart = echarts.init(document.getElementById('echarts-calendar'));
+        }
+
+        function renderCharts() {
+            renderMonthlyChart(currentChartTypes['month-count']);
+            renderHourlyChart(currentChartTypes['hours']);
+            renderWeekdayChart(currentChartTypes['weekday']);
+            renderMessageTypeChart(currentChartTypes['types']);
+            renderSenderRatioChart(currentChartTypes['sender']);
+            renderWordCloudChart();
+            if (calendarYearSelect.value) {
+                renderCalendarChart(calendarYearSelect.value);
+            }
+        }
+        
+        function renderMonthlyChart(type) {
+            if (!monthChart) return;
+            const { months, data } = getMonthlyChatData();
+            const styleOpts = getChartStyleOptions();
+            monthChart.setOption({
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: months, axisLabel: { color: styleOpts.textColor }, axisLine: { lineStyle: { color: styleOpts.axisLineColor } } },
+                yAxis: { type: 'value', axisLabel: { color: styleOpts.textColor }, splitLine: { lineStyle: { color: styleOpts.splitLineColor } } },
+                series: [{ data: data, type: type }],
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true }
+            }, true);
+        }
+
+        function renderHourlyChart(type) {
+            if (!hoursChart) return;
+            const { hours, data } = getHourlyChatData();
+            const styleOpts = getChartStyleOptions();
+            const option = {
+                tooltip: { trigger: type === 'pie' ? 'item' : 'axis' },
+                series: [{ name: '消息数量', type: type, data: type === 'pie' ? hours.map((h, i) => ({ name: h, value: data[i] })) : data }]
+            };
+            if (type !== 'pie') {
+                option.xAxis = { type: 'category', data: hours, axisLabel: { color: styleOpts.textColor }, axisLine: { lineStyle: { color: styleOpts.axisLineColor } } };
+                option.yAxis = { type: 'value', axisLabel: { color: styleOpts.textColor }, splitLine: { lineStyle: { color: styleOpts.splitLineColor } } };
+                option.grid = { left: '3%', right: '4%', bottom: '3%', containLabel: true };
+            } else {
+                 option.legend = { textStyle: { color: styleOpts.textColor }, type: 'scroll' };
+                 option.series[0].radius = '60%';
+            }
+            hoursChart.setOption(option, true);
+        }
+        
+        function renderWeekdayChart(type) {
+            if (!weekdayChart) return;
+            const { weekdays, data } = getWeekdayChatData();
+            const styleOpts = getChartStyleOptions();
+            const option = {
+                tooltip: { trigger: type === 'pie' ? 'item' : 'axis' },
+                series: [{ name: '消息数量', type: type, data: type === 'pie' ? weekdays.map((d, i) => ({ name: d, value: data[i] })) : data }]
+            };
+            if (type !== 'pie') {
+                option.xAxis = { type: 'category', data: weekdays, axisLabel: { color: styleOpts.textColor }, axisLine: { lineStyle: { color: styleOpts.axisLineColor } } };
+                option.yAxis = { type: 'value', axisLabel: { color: styleOpts.textColor }, splitLine: { lineStyle: { color: styleOpts.splitLineColor } } };
+                option.grid = { left: '3%', right: '4%', bottom: '3%', containLabel: true };
+            } else {
+                 option.legend = { textStyle: { color: styleOpts.textColor }, type: 'scroll' };
+                 option.series[0].radius = '60%';
+            }
+            weekdayChart.setOption(option, true);
+        }
+
+        function renderMessageTypeChart(type) {
+            if (!typesChart) return;
+            const data = getMessageTypeData();
+            const styleOpts = getChartStyleOptions();
+            const option = {
+                tooltip: { trigger: 'item' },
+                legend: { textStyle: { color: styleOpts.textColor }, type: 'scroll' },
+                series: [{ name: '消息类型', type: type, data: data, radius: '60%' }]
+            };
+            if (type === 'bar') {
+                option.xAxis = { type: 'category', data: data.map(d => d.name), axisLabel: { color: styleOpts.textColor }, axisLine: { lineStyle: { color: styleOpts.axisLineColor } } };
+                option.yAxis = { type: 'value', axisLabel: { color: styleOpts.textColor }, splitLine: { lineStyle: { color: styleOpts.splitLineColor } } };
+                option.grid = { left: '3%', right: '4%', bottom: '3%', containLabel: true };
+                delete option.legend;
+            }
+            typesChart.setOption(option, true);
+        }
+
+        function renderSenderRatioChart(type) {
+            if (!senderChart) return;
+            const data = getSenderRatioData();
+            const styleOpts = getChartStyleOptions();
+            const option = {
+                tooltip: { trigger: 'item' },
+                legend: { textStyle: { color: styleOpts.textColor }, type: 'scroll' },
+                series: [{ name: '消息占比', type: type, data: data, radius: '60%' }]
+            };
+             if (type === 'bar') {
+                option.xAxis = { type: 'category', data: data.map(d => d.name), axisLabel: { color: styleOpts.textColor }, axisLine: { lineStyle: { color: styleOpts.axisLineColor } } };
+                option.yAxis = { type: 'value', axisLabel: { color: styleOpts.textColor }, splitLine: { lineStyle: { color: styleOpts.splitLineColor } } };
+                option.grid = { left: '3%', right: '4%', bottom: '3%', containLabel: true };
+                delete option.legend;
+            }
+            senderChart.setOption(option, true);
+        }
+        
+        function renderWordCloudChart() {
+            if (!wordcloudChart) return;
+            const data = getWordCloudData();
+            wordcloudChart.setOption({
+                tooltip: { show: true },
+                series: [{
+                    type: 'wordCloud',
+                    gridSize: 8,
+                    sizeRange: [12, 60],
+                    rotationRange: [-90, 90],
+                    shape: 'circle',
+                    drawOutOfBound: false,
+                    textStyle: {
+                        color: () => {
+                             if (body.classList.contains('dark')) {
+                                return 'rgb(' + [Math.round(Math.random() * 96 + 160), Math.round(Math.random() * 96 + 160), Math.round(Math.random() * 96 + 160)].join(',') + ')';
+                            } else {
+                                return 'rgb(' + [Math.round(Math.random() * 160),Math.round(Math.random() * 160), Math.round(Math.random() * 160)].join(',') + ')';
+                            }
+                        }
+                    },
+                    emphasis: { focus: 'self', textStyle: { shadowBlur: 10, shadowColor: '#333' } },
+                    data: data
+                }]
+            });
+        }
+
+        function renderCalendarChart(year) {
+            if (!calendarChart) return;
+            if (!year) {
+                calendarChart.clear();
+                return;
+            }
+            const calData = getCalendarData(year);
+            const isDarkMode = body.classList.contains('dark');
+            calendarChart.setOption({
+                tooltip: {
+                    position: 'top',
+                    formatter: function (p) {
+                        const format = echarts.format.formatTime('yyyy-MM-dd', p.data[0]);
+                        return format + ': ' + p.data[1] + ' 消息';
+                    }
+                },
+                visualMap: {
+                    min: 0,
+                    max: calData.length > 0 ? Math.max(...calData.map(item => item[1])) || 1 : 1,
+                    calculable: true,
+                    orient: 'horizontal',
+                    left: 'center',
+                    top: 'top',
+                    inRange: {
+                        color: isDarkMode
+                            ? ['#19283a', '#2a4365', '#4a5568', '#6b7280', '#90cdf4']
+                            : ['#ebedf0', '#c6e48b', '#7bc96d', '#239a3b', '#196127']
+                    },
+                    textStyle: {
+                        color: isDarkMode ? '#e0e0e0' : '#333'
+                    }
+                },
+                calendar: {
+                    top: 80,
+                    left: 30,
+                    right: 30,
+                    cellSize: ['auto', 20],
+                    range: year,
+                    itemStyle: {
+                        borderWidth: 0.5,
+                        borderColor: isDarkMode ? 'var(--bg-color)' : '#fff'
+                    },
+                    yearLabel: {
+                        formatter: '{start} 年',
+                        margin: 40,
+                        color: isDarkMode ? '#e0e0e0' : '#333'
+                    },
+                    dayLabel: {
+                        nameMap: 'cn',
+                        color: isDarkMode ? '#e0e0e0' : '#333'
+                    },
+                    monthLabel: {
+                        nameMap: 'cn',
+                        color: isDarkMode ? '#e0e0e0' : '#333'
+                    }
+                },
+                series: [{
+                    type: 'heatmap',
+                    coordinateSystem: 'calendar',
+                    data: calData
+                }]
+            }, true);
+        }
+        
+        function getChatTimeGroupData() {
+            const timeThreshold = 15 * 60 * 1000;
+            const sortedData = [...chatData].sort((a, b) => new Date(a.StrTime) - new Date(b.StrTime));
+            const groups = [];
+            let currentGroup = null;
+            sortedData.forEach(r => {
+                const time = new Date(r.StrTime).getTime();
+                if (!currentGroup || (time - new Date(currentGroup.endTime).getTime() > timeThreshold)) {
+                    if(currentGroup) groups.push(currentGroup);
+                    currentGroup = { id: groups.length, startTime: r.StrTime, endTime: r.StrTime, messageCount: 1, records: [r] };
+                } else {
+                    currentGroup.endTime = r.StrTime;
+                    currentGroup.messageCount++;
+                    currentGroup.records.push(r);
+                }
+            });
+            if(currentGroup) groups.push(currentGroup);
+            
+            const maxCount = Math.max(...groups.map(g => g.messageCount));
+            return groups.map(g => ({ ...g, normalizedCount: maxCount > 0 ? g.messageCount / maxCount : 0 }));
+        }
+
+        function analyzeChatTimeGroups() {
+            const nodes = getChatTimeGroupData();
+            renderChatTimeGroupGraph(nodes);
+        }
+
+        function renderChatTimeGroupGraph(nodes) {
+            chatTimeGroupGraph.innerHTML = '';
+            if (nodes.length === 0) return;
+            const width = chatTimeGroupGraph.clientWidth;
+            const height = chatTimeGroupGraph.clientHeight;
+             if (width <= 0 || height <= 0) {
+                setTimeout(() => renderChatTimeGroupGraph(nodes), 100);
+                return;
+            }
+            const svg = d3.select(chatTimeGroupGraph).append("svg").attr("width", width).attr("height", height).attr("viewBox", [-width / 2, -height / 2, width, height]);
+            const g = svg.append("g");
+            
+            const radiusScale = d3.scaleSqrt().domain([1, d3.max(nodes, d => d.messageCount)]).range([5, 40]);
+            const simulation = d3.forceSimulation(nodes)
+                .force("charge", d3.forceManyBody().strength(-100))
+                .force("center", d3.forceCenter(0, 0))
+                .force("collide", d3.forceCollide(d => radiusScale(d.messageCount) + 2))
+                .force("activityPull", d3.forceY(0).strength(d => d.normalizedCount * 0.5));
+
+            const node = g.selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => radiusScale(d.messageCount))
+                .attr("fill", d3.scaleOrdinal(d3.schemeCategory10))
+                .call(d3.drag().on("start", (e,d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+                    .on("drag", (e,d) => { d.fx = e.x; d.fy = e.y; })
+                    .on("end", (e,d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+            node.append("title").text(d => `时间: ${d.startTime} - ${d.endTime}\n消息数: ${d.messageCount}`);
+            node.on("dblclick", (e, d) => showRawDataModal({ records: d.records }, "时间组聊天记录"));
+
+            const label = g.selectAll(null).data(nodes).enter().append("text").text(d => d.messageCount)
+                .attr("class", "node-label").attr("font-size", "10px").attr("text-anchor", "middle").attr("dy", "0.35em");
+
+            simulation.on("tick", () => {
+                node.attr("cx", d => d.x).attr("cy", d => d.y);
+                label.attr("x", d => d.x).attr("y", d => d.y);
+            });
+            svg.call(d3.zoom().scaleExtent([0.5, 8]).on("zoom", e => g.attr("transform", e.transform)));
+        }
+        
+        function showRawDataModal(data, title) {
+            rawDataModalTitle.textContent = title;
+            let contentHtml = '';
+            if (title.includes('时间组聊天记录')) {
+                 contentHtml = data.records.map(r => `<p><strong>${r.StrTime} - ${r.NickName}:</strong> ${r.StrContent}</p>`).join('');
+            } else if (title.includes('原始数据')) {
+                contentHtml += '<div class="formatted-data-list">';
+                if(data.months) data.months.forEach((month, index) => { contentHtml += `<p><strong>${month}:</strong> ${data.data[index]} 条消息</p>`; });
+                else if(data.hours) data.hours.forEach((hour, index) => { contentHtml += `<p><strong>${hour}:</strong> ${data.data[index]} 条消息</p>`; });
+                else if(data.weekdays) data.weekdays.forEach((day, index) => { contentHtml += `<p><strong>${day}:</strong> ${data.data[index]} 条消息</p>`; });
+                else if(Array.isArray(data)) data.forEach(item => { contentHtml += `<p><strong>${item.name || item[0]}:</strong> ${item.value || item[1]}</p>`; });
+                contentHtml += '</div>';
+            } else {
+                 contentHtml = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+            rawDataModalBody.innerHTML = contentHtml;
+            rawDataModal.classList.remove('hidden');
+        }
+
+        // --- 初始化与事件监听 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            connect();
+
+            // 主题切换
+            themeToggle.addEventListener('click', () => {
+                body.classList.toggle('dark');
+                const isDark = body.classList.contains('dark');
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                themeToggle.innerHTML = isDark ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+                if (chatData.length > 0) {
+                    const styleOpts = getChartStyleOptions();
+                    d3.selectAll('.node-label').attr('fill', styleOpts.textColor);
+                    renderCharts();
+                    analyzeChatTimeGroups();
+                }
+            });
+            if (localStorage.getItem('theme') === 'light') {
+                body.classList.remove('dark');
+                themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+            } else {
+                 themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+            }
+
+            // 视图切换
+            showFriendsBtn.addEventListener('click', () => {
+                currentView = 'friends';
+                showFriendsBtn.classList.replace('bg-gray-600', 'bg-blue-600');
+                showGroupsBtn.classList.replace('bg-blue-600', 'bg-gray-600');
+                renderCurrentView();
+            });
+            showGroupsBtn.addEventListener('click', () => {
+                currentView = 'groups';
+                showGroupsBtn.classList.replace('bg-gray-600', 'bg-blue-600');
+                showFriendsBtn.classList.replace('bg-blue-600', 'bg-gray-600');
+                renderCurrentView();
+            });
+            searchInputContact.addEventListener('input', renderCurrentView);
+            expandAllBtn.addEventListener('click', () => document.querySelectorAll('.friend-group-details').forEach(d => d.open = true));
+            collapseAllBtn.addEventListener('click', () => document.querySelectorAll('.friend-group-details').forEach(d => d.open = false));
+            
+            // 分析区事件
+            searchButton.addEventListener('click', performSearch);
+            exportFilteredButton.addEventListener('click', () => {
+                const filename = `${activeChat.readableId}-${activeChat.name}_filtered_records.csv`;
+                exportData(filteredChatData, filename);
+            });
+            calendarYearSelect.addEventListener('change', () => renderCalendarChart(calendarYearSelect.value));
+            
+            chatRecordsContainer = document.getElementById('chat-records-container');
+            chatRecordsSizer = document.getElementById('chat-records-sizer');
+            chatRecordsTable = chatRecordsSizer.querySelector('table');
+            chatRecordsContainer.addEventListener('scroll', handleVirtualScroll);
+
+            document.getElementById('exportAllSection').addEventListener('click', e => {
+                if(!e.target.matches('button[data-export]')) return;
+                if (chatData.length === 0) { alert('没有可导出的分析数据。'); return; }
+                const type = e.target.dataset.export;
+                const filename = `${activeChat.readableId}-${activeChat.name}_${type}_stats.csv`;
+                if(type === 'daily') {
+                    const data = getDailyChatData();
+                    exportData(Object.entries(data).map(([k,v])=>({Date:k, Count:v})), filename);
+                } else if (type === 'monthly') {
+                    const {months, data} = getMonthlyChatData();
+                    exportData(months.map((m,i)=>({Month:m, Count:data[i]})), filename);
+                } else if (type === 'hourly') {
+                    const {hours, data} = getHourlyChatData();
+                    exportData(hours.map((h,i)=>({Hour:h, Count:data[i]})), filename);
+                } else if (type === 'weekday') {
+                    const {weekdays, data} = getWeekdayChatData();
+                    exportData(weekdays.map((d,i)=>({Weekday:d, Count:data[i]})), filename);
+                } else if (type === 'types') {
+                    exportData(getMessageTypeData(), filename, ['name', 'value']);
+                } else if (type === 'sender') {
+                    exportData(getSenderRatioData(), filename, ['name', 'value']);
+                } else if (type === 'wordcloud') {
+                    exportData(getWordCloudData(), filename, ['name', 'value']);
+                } else if (type === 'timegroup') {
+                    const nodes = getChatTimeGroupData();
+                    const exportArray = nodes.map(n => ({ StartTime: n.startTime, EndTime: n.endTime, MessageCount: n.messageCount }));
+                    exportData(exportArray, filename);
+                }
+            });
+
+            document.getElementById('exportAllAnalysisDataButton').addEventListener('click', () => {
+                if (chatData.length === 0) { alert('没有可导出的分析数据。'); return; }
+                const allAnalysis = {
+                    summary: { totalMessages: totalMessagesEl.textContent, totalDays: totalDaysEl.textContent, avgDailyMessages: avgDailyMessagesEl.textContent },
+                    dailyStats: getDailyChatData(), monthlyStats: getMonthlyChatData(), hourlyStats: getHourlyChatData(), weekdayStats: getWeekdayChatData(),
+                    messageTypes: getMessageTypeData(), senderRatio: getSenderRatioData(), wordCloud: getWordCloudData(),
+                    timeGroups: getChatTimeGroupData().map(n => ({...n, records: undefined}))
+                };
+                const blob = new Blob([JSON.stringify(allAnalysis, null, 2)], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `${activeChat.readableId}-${activeChat.name}_full_analysis.json`;
+                link.click();
+            });
+
+            rawDataModalClose.addEventListener('click', () => rawDataModal.classList.add('hidden'));
+
+            // Chart options button listener
+             document.querySelectorAll('.chart-options-button').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    const chartId = button.dataset.chartId;
+                    const availableOptions = button.dataset.chartOptions.split(',');
+                    
+                    const rect = button.getBoundingClientRect();
+                    chartOptionsDropdown.style.top = `${rect.bottom + window.scrollY + 5}px`;
+                    chartOptionsDropdown.style.left = `${rect.left + window.scrollX - 100}px`;
+                    
+                    chartOptionsDropdown.innerHTML = '';
+
+                    if (availableOptions.length > 1) {
+                        availableOptions.forEach(optionType => {
+                            if (optionType !== currentChartTypes[chartId]) {
+                                const switchBtn = document.createElement('button');
+                                switchBtn.textContent = `切换为 ${optionType === 'bar' ? '柱状图' : (optionType === 'line' ? '折线图' : '饼图')}`;
+                                switchBtn.onclick = () => {
+                                    currentChartTypes[chartId] = optionType;
+                                    switch (chartId) {
+                                        case 'month-count': renderMonthlyChart(optionType); break;
+                                        case 'hours': renderHourlyChart(optionType); break;
+                                        case 'weekday': renderWeekdayChart(optionType); break;
+                                        case 'types': renderMessageTypeChart(optionType); break;
+                                        case 'sender': renderSenderRatioChart(optionType); break;
+                                    }
+                                    chartOptionsDropdown.classList.add('hidden');
+                                };
+                                chartOptionsDropdown.appendChild(switchBtn);
+                            }
+                        });
+                    }
+
+                    const viewDataBtn = document.createElement('button');
+                    viewDataBtn.textContent = '查看原始数据';
+                    viewDataBtn.onclick = () => {
+                        let data, title;
+                        switch (chartId) {
+                            case 'month-count': data = getMonthlyChatData(); title = '逐月聊天消息统计原始数据'; break;
+                            case 'hours': data = getHourlyChatData(); title = '聊天频率 (小时分布) 原始数据'; break;
+                            case 'weekday': data = getWeekdayChatData(); title = '星期分布图原始数据'; break;
+                            case 'types': data = getMessageTypeData(); title = '消息类型占比原始数据'; break;
+                            case 'sender': data = getSenderRatioData(); title = '双方消息占比原始数据'; break;
+                            case 'wordcloud': data = getWordCloudData(); title = '高频词云原始数据'; break;
+                            case 'calendar': data = getCalendarData(calendarYearSelect.value); title = `日历热力图 (${calendarYearSelect.value}年) 原始数据`; break;
+                        }
+                        showRawDataModal(data, title);
+                        chartOptionsDropdown.classList.add('hidden');
+                    };
+                    chartOptionsDropdown.appendChild(viewDataBtn);
+
+                    if (chartOptionsDropdown.innerHTML) {
+                        chartOptionsDropdown.classList.toggle('hidden');
+                    }
+                });
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!chartOptionsDropdown.contains(event.target) && !event.target.closest('.chart-options-button')) {
+                    chartOptionsDropdown.classList.add('hidden');
+                }
+            });
+
+
+            // Resize charts on window resize
+            window.addEventListener('resize', () => {
+                 if (analysisContainer.classList.contains('hidden')) return;
+                 [monthChart, hoursChart, weekdayChart, typesChart, senderChart, wordcloudChart, calendarChart].forEach(chart => {
+                    chart?.resize();
+                });
+            })
+        });
+    </script>
+</body>
+</html>
+

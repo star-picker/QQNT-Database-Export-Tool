@@ -1,0 +1,15 @@
+{
+    "show_recall": true,
+    "show_recall_suffix": true,
+    "show_poke": true,
+    "show_voice_to_text": true,
+    "export_non_friends": true,
+    "export_format": "html",
+    "html_template": "default.html",
+    "show_media_info": true,
+    "name_style": "default",
+    "name_format": "",
+    "add_file_header": true,
+    "parse_protobuf_fields": true,
+    "api_export_action": "download"
+}
